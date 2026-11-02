@@ -1,4 +1,4 @@
-# Appa App — Phase 1 (minimum lovable version)
+# Appa App — Phases 1 and 2
 
 A Tamil-first, voice-first Android app for Appa, built from the
 [product roadmap](https://claude.ai/artifact/B9DWTfLX9QfvY3wMPEGWxP). It is a bridge to
@@ -13,8 +13,23 @@ people, not a replacement for them: every feature ends with Appa talking to some
 | Payment walkthrough with practice mode | A spoken, step-by-step walkthrough of sending money and checking balance on a mock UPI app with a fake ₹5,000 balance. Moves no money and can be repeated without limit. Never grades him. |
 | Medicine and sleep | Three daily reminders (morning sleep check-in, medicine, evening wind-down) and a one-tap "how did you sleep?" with a 7-day view. |
 
-Deliberately left out, per the roadmap: the companion chatbot, the family question board,
-scam alerts, gamification, and any onboarding longer than two screens.
+**Phase 2 — learning and daily structure:**
+
+| Feature | What it does |
+|---|---|
+| Walkthrough library | 10 spoken, step-by-step practice walkthroughs on mock apps: WhatsApp (voice note by press-and-hold, video call, photo), UPI (send, balance, shop QR), OTP safety, bus ticket, food order (+ Tamil dish glossary), Maps directions. After finishing one, he can mark "I did it in the real app myself". |
+| Scam alert of the week | A short Tamil story about a real scam pattern (12 in rotation), its giveaway sign and what to do. One tap forwards it to friends, signed by him. |
+| Daily plan he owns | He builds today's or tomorrow's checklist from suggestions, by typing, or by speaking (Tamil speech-to-text). It never nags. Family can add one item a day each, shown as "அம்மா கேட்டது" (a request, not an order). |
+| Health log | BP and sugar readings with gentle typo checks (no "high/low" verdicts), 8-week line charts, and a 30-day page to show or send to the doctor. |
+| Family question board | Family ask by voice or text from their own phones (or on his). He hears the question and answers by voice. |
+| What family can see | One screen, in his words, listing everything shared. Health, sleep and plan are off until he turns them on. Turning one off deletes the family's copy. |
+| Weekly review | Settings → வாராந்திர ஆய்வு: the numbers for the Sunday review (stories, calls, plan days, walkthroughs, real-world wins, questions, 4 weeks of sleep) and the Phase 2 exit criteria. |
+
+The family phone now has four tabs: stories, questions, Appa's day (only what he shares, plus one
+request a day) and settings.
+
+Still left out, per the roadmap: the companion chatbot, pattern alerts, gamification, his own bank's
+app and pension-portal walkthroughs (need his real details first), and dish photos.
 
 ## Tech stack (all free)
 
@@ -27,8 +42,11 @@ scam alerts, gamification, and any onboarding longer than two screens.
 | Calls | `url_launcher` → the phone's dialer | |
 | Storage | `shared_preferences` + audio files on the phone | Offline-first; nothing leaves the phone unless sync is on |
 | Family sync (optional) | Supabase free tier: Postgres, private storage bucket, anonymous sign-in, row-level security | Family hear stories on their own phones |
+| Tamil voice in | `speech_to_text` → the phone's own Google speech recogniser | Free, no API key (daily plan dictation) |
+| Forwarding | `share_plus` → the phone's share sheet | He picks WhatsApp/SMS and the people |
+| Charts | Hand-drawn `CustomPainter`, colour-blind-safe palette | No chart library needed |
 
-No analytics SDKs, no ad SDKs, no trackers, and no LLM in Phase 1. Walkthroughs are
+No analytics SDKs, no ad SDKs, no trackers, and no LLM. Walkthroughs are
 scripted (`lib/logic/walkthrough.dart`), so they are deterministic and never confidently wrong.
 
 ## Run it on a phone
@@ -39,7 +57,7 @@ and Android Studio (for the Android SDK). Both are free.
 ```bash
 cd /Users/ragulkts/Highonswift/Appa
 flutter pub get
-flutter test                 # 29 tests
+flutter test                 # 52 tests
 flutter run                  # with Appa's phone plugged in, USB debugging on
 flutter build apk --release  # APK at build/app/outputs/flutter-apk/app-release.apk
 ```
@@ -64,7 +82,8 @@ Without sync, everything works on Appa's phone alone, and family can record a re
 his phone during a visit. To let family listen and reply from their own phones:
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. In the dashboard: **SQL Editor → New query →** paste `supabase/schema.sql` **→ Run**.
+2. In the dashboard: **SQL Editor → New query →** paste `supabase/schema.sql` **→ Run**, then
+   the same for `supabase/migrations/002_phase2.sql` (already set up for Phase 1? run only this one).
 3. **Authentication → Sign In / Providers →** turn on **Allow anonymous sign-ins**.
 4. **Project Settings → API**: copy the Project URL and the publishable (anon) key.
 5. On Appa's phone: settings → paste both → **பகிர்தலைத் தொடங்கு** (start sharing). It shows a
@@ -72,8 +91,11 @@ his phone during a visit. To let family listen and reply from their own phones:
 6. On each family phone, choose **குடும்பத்தினர் போன்** (family phone) at first launch, then
    in settings paste the same URL and key plus the family code, and tap **சேர்** (join).
 
-Only Appa's stories and the family's replies are shared. Sleep, calls and reminders stay
-on his phone. Row-level security limits every row and voice file to one household.
+Always shared once sync is on: his stories, family replies and questions, and his answers.
+Health, sleep and the daily plan are shared only while he has switched them on
+(**குடும்பம் என்ன பார்க்கிறது** on his home screen). Calls, walkthroughs and reminder times never
+leave his phone. Row-level security limits every row and voice file to one household, and
+refuses family reads of anything he has not shared.
 
 ## Code map
 
@@ -85,10 +107,17 @@ lib/
   data/story_prompts.dart   30 Tamil story questions (Appa should review them)
   data/local_store.dart     on-device storage
   logic/daily_picker.dart   question of the day, person of the day, sleep window (pure)
-  logic/walkthrough.dart    scripted walkthrough engine + Phase 1 scripts (pure)
-  services/                 speech, audio, reminders, phone, sync (each with a fake for tests)
-  screens/                  setup, home, story, call, walkthrough, routine, settings, family
-supabase/schema.sql         tables, RPCs, row-level security, private voice bucket
+  logic/walkthrough.dart    walkthrough engine: mock screens as data, actions, golden path (pure)
+  logic/phase2.dart         scam of the week, plan rules, health checks/summary, weekly review (pure)
+  data/walkthroughs.dart    the 10 walkthrough scripts, in display order
+  data/scam_stories.dart    12 scam-pattern stories
+  data/dish_glossary.dart   18 menu dishes explained in Tamil
+  services/                 speech, dictation + sharing, audio, reminders, phone, sync (each with a fake)
+  widgets/health_chart.dart two-series line chart with legend, end labels, tap-to-read
+  screens/                  setup, home, story, questions, call, plan, walkthrough, scam,
+                            routine, health, sharing (+ weekly review), settings, family (tabs)
+supabase/schema.sql         Phase 1 tables, RPCs, row-level security, private voice bucket
+supabase/migrations/        002_phase2.sql: questions, plan, health, sleep, sharing + consent RLS
 test/                       unit tests (logic) + widget tests (screens)
 ```
 
@@ -102,5 +131,11 @@ test/                       unit tests (logic) + widget tests (screens)
 - **Not yet verified on a device.** The tests run on the Flutter test engine, and the
   Android build has not been run yet. Test recording, playback, Tamil TTS,
   reminders and one-tap calling on his actual phone before handing it over.
-- **Exit criteria (from the roadmap).** Used on 10 of 14 days unprompted, at least 5 stories, at least 3
-  calls from the nudge, and at least 10 complaints from him.
+- **Walkthrough order.** Reorder `walkthroughLibrary` in `lib/data/walkthroughs.dart` to the
+  ranking Appa gives at the week-3 review. Refresh `scam_stories.dart` with what is circulating locally.
+- **Ragul and Amma's commitment.** At least two real questions a week on the question board
+  before it ships to him, or he will notice it is empty.
+- **Exit criteria (from the roadmap).** Phase 1: used on 10 of 14 days unprompted, at least 5 stories,
+  at least 3 calls from the nudge, at least 10 complaints. Phase 2: at least 4 walkthroughs and one
+  real thing done without help, 6 family questions answered, a visible sleep trend, and Amma's
+  word on whether the daily plan reduces friction. The weekly review screen tracks these.

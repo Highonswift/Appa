@@ -1,5 +1,6 @@
 import 'package:appa_app/data/story_prompts.dart';
 import 'package:appa_app/logic/daily_picker.dart';
+import 'package:appa_app/data/walkthroughs.dart';
 import 'package:appa_app/logic/walkthrough.dart';
 import 'package:appa_app/models/models.dart';
 import 'package:appa_app/services/reminders.dart';
@@ -96,26 +97,77 @@ void main() {
   });
 
   group('walkthrough engine', () {
-    test('send-money flow completes and deducts only practice balance', () {
+    test('every walkthrough in the library completes on its golden path', () {
+      for (final w in walkthroughLibrary) {
+        final s = WalkthroughSession(w);
+        var guard = 0;
+        while (!s.completed && guard++ < 50) {
+          final r = s.handle(goldenAction(s.step));
+          expect(r.advanced, isTrue, reason: '${w.id} step ${s.index}');
+        }
+        expect(s.completed, isTrue, reason: w.id);
+      }
+    });
+
+    test('library ids are unique and every step can be guided', () {
+      expect(
+        walkthroughLibrary.map((w) => w.id).toSet().length,
+        walkthroughLibrary.length,
+      );
+      for (final w in walkthroughLibrary) {
+        for (final st in w.steps) {
+          expect(st.hint, isNotNull, reason: '${w.id} ${st.say}');
+          if (st.expects == Expect.tap || st.expects == Expect.longPress) {
+            expect(st.target, isNotNull, reason: w.id);
+            // The target must be drawn on that step's screen.
+            final ids = <String>{
+              for (final e in st.view.elements)
+                ...switch (e) {
+                  MButton(:final id) => [id],
+                  MTile(:final id) => [id],
+                  MQr(:final id) => [id],
+                  MGrid(:final items) => items.map((b) => b.id),
+                  MIconBar(:final items) => items.map((b) => b.id),
+                  MComposer(:final attachId, :final cameraId, :final micId) => [
+                    attachId,
+                    cameraId,
+                    micId,
+                  ],
+                  _ => <String>[],
+                },
+            };
+            expect(
+              ids,
+              contains(st.target),
+              reason: '${w.id}: ${st.target} not on screen',
+            );
+          }
+        }
+      }
+    });
+
+    test('send-money flow deducts only the practice balance', () {
       final s = WalkthroughSession(sendMoneyWalkthrough);
-      expect(s.handle(const Tap('start')).advanced, isTrue);
-      expect(s.handle(const Tap('pay')).advanced, isTrue);
-      expect(s.handle(const Tap('contact')).advanced, isTrue);
-      expect(s.handle(const EnterAmount(250)).advanced, isTrue);
-      final confirm = s.narration(s.step);
-      expect(confirm, contains('250'));
-      expect(confirm, contains(practiceRecipient));
-      expect(s.handle(const Tap('send')).advanced, isTrue);
-      expect(s.handle(const EnterPin(4)).advanced, isTrue);
+      for (final a in const <MockAction>[
+        Tap('start'),
+        Tap('pay'),
+        Tap('contact'),
+        EnterNumber(250),
+      ]) {
+        expect(s.handle(a).advanced, isTrue);
+      }
+      expect(s.narration(s.step), contains('250'));
+      expect(s.narration(s.step), contains(practiceRecipient));
+      s.handle(const Tap('send'));
+      s.handle(const EnterPin(4));
       expect(s.balance, practiceStartBalance - 250);
-      expect(s.step.screen, MockScreen.success);
       expect(s.completed, isFalse);
-      expect(s.handle(const Tap('done')).advanced, isTrue);
+      s.handle(const Tap('done'));
       expect(s.completed, isTrue);
     });
 
     test(
-      'a different tap never says "wrong", it points at the right button',
+      'a different tap never says "wrong", it points at the right control',
       () {
         final s = WalkthroughSession(sendMoneyWalkthrough)
           ..handle(const Tap('start'));
@@ -123,29 +175,62 @@ void main() {
         expect(r.advanced, isFalse);
         expect(r.message, contains('பணம் அனுப்பு'));
         expect(r.message, isNot(contains('தவறு'))); // "wrong"
-        expect(s.step.screen, MockScreen.home);
       },
     );
 
-    test('amount must be positive and within the practice balance', () {
-      final s = WalkthroughSession(sendMoneyWalkthrough)
+    test('safety walkthrough explains why when he chooses to tell the OTP', () {
+      final s = WalkthroughSession(otpSafetyWalkthrough)
         ..handle(const Tap('start'))
-        ..handle(const Tap('pay'))
-        ..handle(const Tap('contact'));
-      expect(s.handle(const EnterAmount(0)).advanced, isFalse);
-      expect(s.handle(const EnterAmount(999999)).advanced, isFalse);
-      expect(s.step.screen, MockScreen.amount);
+        ..handle(const Tap('next'));
+      final r = s.handle(const Tap('tell'));
+      expect(r.advanced, isFalse);
+      expect(r.message, contains('ஒருபோதும் OTP கேட்காது'));
+      expect(s.handle(const Tap('hangup')).advanced, isTrue);
     });
 
-    test('PIN needs 4 or 6 digits', () {
-      final s = WalkthroughSession(checkBalanceWalkthrough)
+    test('voice note needs press-and-hold; a plain tap gets a pointer', () {
+      final s = WalkthroughSession(waVoiceNoteWalkthrough)
         ..handle(const Tap('start'))
-        ..handle(const Tap('balance'));
-      expect(s.handle(const EnterPin(2)).advanced, isFalse);
-      expect(s.handle(const EnterPin(6)).advanced, isTrue);
-      expect(s.balance, practiceStartBalance);
-      expect(s.narration(s.step), contains('$practiceStartBalance'));
+        ..handle(const Tap('family'));
+      final tap = s.handle(const Tap('mic'));
+      expect(tap.advanced, isFalse);
+      expect(tap.message, contains('பிடித்துக்கொண்டே'));
+      expect(s.handle(const LongPress('mic')).advanced, isTrue);
     });
+
+    test('bus ticket fixes the fare and fills the typed name', () {
+      final s = WalkthroughSession(busTicketWalkthrough);
+      for (final a in const <MockAction>[
+        Tap('start'),
+        Tap('search'),
+        Tap('bus1'),
+        Tap('seat5'),
+        EnterText('ராமசாமி'),
+      ]) {
+        s.handle(a);
+      }
+      expect(s.amount, 420);
+      expect(s.fill('{text}'), 'ராமசாமி');
+      s.handle(const Tap('pay'));
+      s.handle(const EnterPin(4));
+      expect(s.balance, practiceStartBalance - 420);
+    });
+
+    test(
+      'amount must be positive and within the practice balance; PIN 4 or 6',
+      () {
+        final s = WalkthroughSession(sendMoneyWalkthrough)
+          ..handle(const Tap('start'))
+          ..handle(const Tap('pay'))
+          ..handle(const Tap('contact'));
+        expect(s.handle(const EnterNumber(0)).advanced, isFalse);
+        expect(s.handle(const EnterNumber(999999)).advanced, isFalse);
+        s.handle(const EnterNumber(10));
+        s.handle(const Tap('send'));
+        expect(s.handle(const EnterPin(2)).advanced, isFalse);
+        expect(s.handle(const EnterPin(6)).advanced, isTrue);
+      },
+    );
 
     test('restart is unlimited and resets the balance', () {
       final s = WalkthroughSession(sendMoneyWalkthrough);
@@ -153,7 +238,7 @@ void main() {
         Tap('start'),
         Tap('pay'),
         Tap('contact'),
-        EnterAmount(100),
+        EnterNumber(100),
         Tap('send'),
         EnterPin(4),
       ]) {
@@ -163,17 +248,6 @@ void main() {
       expect(s.index, 0);
       expect(s.balance, practiceStartBalance);
       expect(s.amount, isNull);
-    });
-
-    test('every tap step has a target and a hint', () {
-      for (final w in phaseOneWalkthroughs) {
-        for (final st in w.steps) {
-          if (st.expects == Tap) {
-            expect(st.target, isNotNull, reason: '${w.id} ${st.screen}');
-          }
-          expect(st.hint, isNotNull, reason: '${w.id} ${st.screen}');
-        }
-      }
     });
   });
 

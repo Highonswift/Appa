@@ -14,6 +14,7 @@ class AppScreen extends StatelessWidget {
     this.speakText,
     this.showBack = true,
     this.scroll = true,
+    this.bare = false,
   });
 
   final String title;
@@ -22,12 +23,16 @@ class AppScreen extends StatelessWidget {
   final bool showBack;
   final bool scroll;
 
+  /// Just the padded body, for use inside another screen (a tab).
+  final bool bare;
+
   @override
   Widget build(BuildContext context) {
     final content = Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       child: body,
     );
+    if (bare) return scroll ? SingleChildScrollView(child: content) : content;
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -38,7 +43,7 @@ class AppScreen extends StatelessWidget {
           if (speakText != null)
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: SpeakButton(text: speakText!, compact: true),
+              child: SpeakButton(text: speakText!, compact: true, label: ''),
             ),
         ],
       ),
@@ -83,6 +88,18 @@ class SpeakButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     void speak() => context.read<AppState>().speaker.speak(text);
+    if (label.isEmpty) {
+      // Icon only (title bars): leaves the title room. TalkBack still
+      // reads "கேளுங்கள்".
+      return IconButton(
+        onPressed: speak,
+        tooltip: 'கேளுங்கள்',
+        iconSize: 36,
+        constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
+        color: AppColors.primary,
+        icon: const Icon(Icons.volume_up),
+      );
+    }
     if (compact) {
       return TextButton.icon(
         onPressed: speak,

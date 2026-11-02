@@ -6,12 +6,18 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'call_screen.dart';
+import 'plan_screen.dart';
+import 'questions_screen.dart';
 import 'routine_screen.dart';
+import 'scam_screen.dart';
 import 'settings_screen.dart';
+import 'sharing_screen.dart';
 import 'story_screen.dart';
 import 'walkthrough_screen.dart';
 
-/// Appa's home. Four big tiles, nothing hidden: no menus, no swipes.
+/// Appa's home. Big tiles, one column, nothing hidden: no menus, no swipes.
+/// Ordered by what the day asks of him: the people first, then his own plan,
+/// then learning and health.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -37,10 +43,19 @@ class HomeScreen extends StatelessWidget {
       callSubtitle = 'பெயர்களைக் குடும்பத்தினர் சேர்ப்பார்கள்';
     }
 
+    final plan = s.planForDay(s.todayKey);
+    final planDone = plan.where((p) => p.done).length;
+    final planSubtitle = plan.isEmpty
+        ? 'இன்று என்ன செய்யலாம் என்று எழுதுங்கள்'
+        : '${plan.length}-இல் $planDone முடிந்தது';
+
+    final q = s.unansweredQuestions;
+    final scamNew = !s.scamShared.contains(s.thisWeeksScam.id);
+
     final greeting = '${tamilGreeting(now)}, ${s.displayName}';
     final speak =
         '$greeting. இன்று ${tamilDate(now)}. '
-        'இன்றைய கதை, இன்று யாரிடம் பேசலாம், பணம் அனுப்பப் பழகுவோம், தூக்கமும் மாத்திரையும். '
+        '${q > 0 ? 'குடும்பத்தினர் $q கேள்வி கேட்டிருக்கிறார்கள். ' : ''}'
         'எதைத் தேர்ந்தெடுக்க வேண்டுமோ அதை அழுத்துங்கள்.';
 
     return Scaffold(
@@ -88,6 +103,16 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               HomeTile(
+                icon: Icons.question_answer,
+                title: 'குடும்பத்தின் கேள்விகள்',
+                subtitle: q > 0 ? 'உங்கள் ஆலோசனை தேவை' : 'புதிய கேள்வி இல்லை',
+                badge: q > 0 ? '$q' : null,
+                color: AppColors.accent,
+                soft: AppColors.accentSoft,
+                onTap: () => _open(context, const QuestionsScreen()),
+              ),
+              const SizedBox(height: 16),
+              HomeTile(
                 icon: Icons.call,
                 title: 'இன்று யாரிடம் பேசலாம்',
                 subtitle: callSubtitle,
@@ -97,35 +122,62 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               HomeTile(
-                icon: Icons.currency_rupee,
-                title: 'பணம் அனுப்பப் பழகுவோம்',
-                subtitle: 'பயிற்சி மட்டும். உண்மையான பணம் போகாது.',
+                icon: Icons.checklist,
+                title: 'இன்றைய திட்டம்',
+                subtitle: planSubtitle,
+                onTap: () => _open(context, const PlanScreen()),
+              ),
+              const SizedBox(height: 16),
+              HomeTile(
+                icon: Icons.school,
+                title: 'கற்றுக்கொள்வோம்',
+                subtitle: 'WhatsApp, பணம், பஸ், உணவு, வழி. பயிற்சி மட்டும்.',
                 color: AppColors.practice,
                 soft: const Color(0xFFF1E4F6),
                 onTap: () => _open(context, const WalkthroughListScreen()),
               ),
               const SizedBox(height: 16),
               HomeTile(
-                icon: Icons.bedtime,
-                title: 'தூக்கமும் மாத்திரையும்',
-                subtitle: 'மாத்திரை ${s.reminderSettings.medicine.label}',
+                icon: Icons.shield,
+                title: 'இந்த வாரம் கவனிக்க',
+                subtitle: s.thisWeeksScam.title,
+                badge: scamNew ? 'புதிது' : null,
+                color: const Color(0xFF37474F),
+                soft: const Color(0xFFE6EBED),
+                onTap: () => _open(context, const ScamScreen()),
+              ),
+              const SizedBox(height: 16),
+              HomeTile(
+                icon: Icons.favorite,
+                title: 'உடல்நலம்',
+                subtitle: 'தூக்கம், மாத்திரை, BP, சர்க்கரை',
                 color: AppColors.accent,
                 soft: AppColors.accentSoft,
                 onTap: () => _open(context, const RoutineScreen()),
               ),
-              const SizedBox(height: 32),
-              Center(
-                child: TextButton.icon(
-                  onPressed: () => _open(context, const SettingsScreen()),
-                  icon: const Icon(
-                    Icons.settings,
-                    size: 24,
-                    color: AppColors.muted,
-                  ),
-                  label: Text(
-                    'குடும்பத்தினருக்கு: அமைப்புகள்',
-                    style: t.bodyMedium?.copyWith(color: AppColors.muted),
-                  ),
+              const SizedBox(height: 28),
+              TextButton.icon(
+                onPressed: () => _open(context, const SharingScreen()),
+                icon: const Icon(
+                  Icons.visibility,
+                  size: 24,
+                  color: AppColors.muted,
+                ),
+                label: Text(
+                  'குடும்பம் என்ன பார்க்கிறது',
+                  style: t.bodyMedium?.copyWith(color: AppColors.muted),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _open(context, const SettingsScreen()),
+                icon: const Icon(
+                  Icons.settings,
+                  size: 24,
+                  color: AppColors.muted,
+                ),
+                label: Text(
+                  'குடும்பத்தினருக்கு: அமைப்புகள்',
+                  style: t.bodyMedium?.copyWith(color: AppColors.muted),
                 ),
               ),
             ],

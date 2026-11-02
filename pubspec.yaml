@@ -48,6 +48,8 @@ dependencies:
   uuid: ^4.6.0
   flutter_localizations:
     sdk: flutter
+  share_plus: ^13.3.1
+  speech_to_text: ^7.5.0
 
 dev_dependencies:
   flutter_test:

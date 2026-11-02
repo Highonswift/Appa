@@ -304,3 +304,203 @@ class ReminderSettings {
 
 /// Which side of the family this phone is.
 enum DeviceRole { appa, family }
+
+// ============================================================== Phase 2
+
+/// One line of the daily plan he builds himself.
+class PlanItem {
+  PlanItem({
+    required this.id,
+    required this.day,
+    required this.text,
+    required this.createdAt,
+    this.done = false,
+    this.addedBy,
+  });
+
+  final String id;
+
+  /// dayKey of the day the item is for.
+  final String day;
+  final String text;
+  final DateTime createdAt;
+  final bool done;
+
+  /// null when Appa wrote it; otherwise the family member who asked
+  /// (roadmap: "Amma can add one item a day").
+  final String? addedBy;
+
+  PlanItem copyWith({bool? done, String? text}) => PlanItem(
+    id: id,
+    day: day,
+    text: text ?? this.text,
+    createdAt: createdAt,
+    done: done ?? this.done,
+    addedBy: addedBy,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'day': day,
+    'text': text,
+    'createdAt': createdAt.toIso8601String(),
+    'done': done,
+    'addedBy': addedBy,
+  };
+
+  factory PlanItem.fromJson(Map<String, dynamic> j) => PlanItem(
+    id: j['id'] as String,
+    day: j['day'] as String,
+    text: j['text'] as String? ?? '',
+    createdAt: DateTime.parse(j['createdAt'] as String),
+    done: j['done'] as bool? ?? false,
+    addedBy: j['addedBy'] as String?,
+  );
+}
+
+enum HealthKind { bp, sugarFasting, sugarAfterFood }
+
+/// A BP or sugar reading he (or Amma) noted down.
+class HealthEntry {
+  HealthEntry({
+    required this.id,
+    required this.at,
+    required this.kind,
+    required this.value,
+    this.value2,
+  });
+
+  final String id;
+  final DateTime at;
+  final HealthKind kind;
+
+  /// BP: systolic (top number). Sugar: mg/dL.
+  final int value;
+
+  /// BP: diastolic (bottom number). Null for sugar.
+  final int? value2;
+
+  String get display => kind == HealthKind.bp ? '$value/$value2' : '$value';
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'at': at.toIso8601String(),
+    'kind': kind.name,
+    'value': value,
+    'value2': value2,
+  };
+
+  factory HealthEntry.fromJson(Map<String, dynamic> j) => HealthEntry(
+    id: j['id'] as String,
+    at: DateTime.parse(j['at'] as String),
+    kind: HealthKind.values.byName(j['kind'] as String),
+    value: j['value'] as int,
+    value2: j['value2'] as int?,
+  );
+}
+
+/// What Appa has agreed the family may see. Stories are always shared once
+/// sync is on (that is the point of them); everything else is off until he
+/// turns it on, and he can turn any of it off again (roadmap: "Appa owns his
+/// data").
+class SharingSettings {
+  const SharingSettings({
+    this.health = false,
+    this.sleep = false,
+    this.plan = false,
+  });
+  final bool health;
+  final bool sleep;
+  final bool plan;
+
+  SharingSettings copyWith({bool? health, bool? sleep, bool? plan}) =>
+      SharingSettings(
+        health: health ?? this.health,
+        sleep: sleep ?? this.sleep,
+        plan: plan ?? this.plan,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'health': health,
+    'sleep': sleep,
+    'plan': plan,
+  };
+
+  factory SharingSettings.fromJson(Map<String, dynamic> j) => SharingSettings(
+    health: j['health'] as bool? ?? false,
+    sleep: j['sleep'] as bool? ?? false,
+    plan: j['plan'] as bool? ?? false,
+  );
+}
+
+/// A question from family for Appa, answered by voice.
+class FamilyQuestion {
+  FamilyQuestion({
+    required this.id,
+    required this.authorName,
+    required this.createdAt,
+    this.text,
+    this.localAudioPath,
+    this.remoteAudioPath,
+    this.answerLocalPath,
+    this.answerRemotePath,
+    this.answeredAt,
+  });
+
+  final String id;
+  final String authorName;
+  final DateTime createdAt;
+
+  /// Typed question (read aloud to him), or null if asked by voice.
+  final String? text;
+  final String? localAudioPath;
+  final String? remoteAudioPath;
+  final String? answerLocalPath;
+  final String? answerRemotePath;
+  final DateTime? answeredAt;
+
+  bool get answered => answeredAt != null;
+
+  FamilyQuestion copyWith({
+    String? localAudioPath,
+    String? answerLocalPath,
+    String? answerRemotePath,
+    DateTime? answeredAt,
+  }) => FamilyQuestion(
+    id: id,
+    authorName: authorName,
+    createdAt: createdAt,
+    text: text,
+    localAudioPath: localAudioPath ?? this.localAudioPath,
+    remoteAudioPath: remoteAudioPath,
+    answerLocalPath: answerLocalPath ?? this.answerLocalPath,
+    answerRemotePath: answerRemotePath ?? this.answerRemotePath,
+    answeredAt: answeredAt ?? this.answeredAt,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'authorName': authorName,
+    'createdAt': createdAt.toIso8601String(),
+    'text': text,
+    'localAudioPath': localAudioPath,
+    'remoteAudioPath': remoteAudioPath,
+    'answerLocalPath': answerLocalPath,
+    'answerRemotePath': answerRemotePath,
+    'answeredAt': answeredAt?.toIso8601String(),
+  };
+
+  factory FamilyQuestion.fromJson(Map<String, dynamic> j) => FamilyQuestion(
+    id: j['id'] as String,
+    authorName: j['authorName'] as String? ?? '',
+    createdAt: DateTime.parse(j['createdAt'] as String),
+    text: j['text'] as String?,
+    localAudioPath: j['localAudioPath'] as String?,
+    remoteAudioPath: j['remoteAudioPath'] as String?,
+    answerLocalPath: j['answerLocalPath'] as String?,
+    answerRemotePath: j['answerRemotePath'] as String?,
+    answeredAt: j['answeredAt'] == null
+        ? null
+        : DateTime.parse(j['answeredAt'] as String),
+  );
+}

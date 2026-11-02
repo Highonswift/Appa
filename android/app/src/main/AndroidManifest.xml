@@ -60,6 +60,10 @@
             <action android:name="android.intent.action.DIAL"/>
             <data android:scheme="tel"/>
         </intent>
+        <!-- Tamil speech-to-text for the daily plan -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
         <!-- On-device Tamil text-to-speech -->
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE"/>

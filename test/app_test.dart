@@ -3,6 +3,7 @@ import 'package:appa_app/data/local_store.dart';
 import 'package:appa_app/main.dart';
 import 'package:appa_app/models/models.dart';
 import 'package:appa_app/services/audio.dart';
+import 'package:appa_app/services/dictation.dart';
 import 'package:appa_app/services/phone.dart';
 import 'package:appa_app/services/reminders.dart';
 import 'package:appa_app/services/speech.dart';
@@ -28,6 +29,7 @@ Future<Harness> makeState({Map<String, Object> prefs = const {}}) async {
   final phone = FakePhone();
   final reminders = FakeReminders();
   final audio = FakeVoiceAudio();
+  final sharer = FakeSharer();
   final state = AppState(
     store: await LocalStore.open(),
     speaker: speaker,
@@ -35,6 +37,8 @@ Future<Harness> makeState({Map<String, Object> prefs = const {}}) async {
     reminders: reminders,
     phone: phone,
     sync: NoFamilySync(),
+    dictation: FakeDictation(),
+    sharer: sharer,
     clock: () => clock,
   );
   return Harness(state, speaker, phone, reminders, audio);
@@ -90,6 +94,8 @@ void main() {
           reminders: FakeReminders(),
           phone: FakePhone(),
           sync: NoFamilySync(),
+          dictation: FakeDictation(),
+          sharer: FakeSharer(),
           clock: () => clock,
         );
         expect(again.stories.length, 1);
@@ -133,8 +139,10 @@ void main() {
       expect(find.textContaining('காலை வணக்கம், அப்பா'), findsOneWidget);
       expect(find.text('இன்றைய கதை'), findsOneWidget);
       expect(find.text('இன்று யாரிடம் பேசலாம்'), findsOneWidget);
-      expect(find.text('பணம் அனுப்பப் பழகுவோம்'), findsOneWidget);
-      expect(find.text('தூக்கமும் மாத்திரையும்'), findsOneWidget);
+      expect(find.text('கற்றுக்கொள்வோம்'), findsOneWidget);
+      expect(find.text('உடல்நலம்'), findsOneWidget);
+      expect(find.text('இன்றைய திட்டம்'), findsOneWidget);
+      expect(find.text('குடும்பத்தின் கேள்விகள்'), findsOneWidget);
     });
 
     testWidgets('morning sleep check-in is one tap on the home screen', (
@@ -193,9 +201,9 @@ void main() {
         prefs: {'role': 'appa', 'displayName': 'அப்பா'},
       );
       await pumpApp(tester, h.state);
-      await tapText(tester, 'பணம் அனுப்பப் பழகுவோம்');
+      await tapText(tester, 'கற்றுக்கொள்வோம்');
       await tapText(tester, 'பணம் அனுப்புவது');
-      expect(find.text('பயிற்சி — உண்மையான பணம் இல்லை'), findsOneWidget);
+      expect(find.text('பயிற்சி — உண்மையானது இல்லை'), findsOneWidget);
 
       Future<void> tap(Finder f) async {
         await tester.ensureVisible(f);

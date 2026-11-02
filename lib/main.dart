@@ -10,6 +10,7 @@ import 'screens/home_screen.dart';
 import 'screens/routine_screen.dart';
 import 'screens/setup_screen.dart';
 import 'services/audio.dart';
+import 'services/dictation.dart';
 import 'services/phone.dart';
 import 'services/reminders.dart';
 import 'services/speech.dart';
@@ -29,6 +30,8 @@ Future<void> main() async {
     reminders: reminders,
     phone: DevicePhone(),
     sync: SupabaseFamilySync(),
+    dictation: DeviceDictation(),
+    sharer: DeviceSharer(),
   );
 
   await reminders.init(onTap: _openFromReminder);
