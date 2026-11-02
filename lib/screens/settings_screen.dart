@@ -7,11 +7,15 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'routine_screen.dart';
+import 'sharing_screen.dart';
 
 /// Settings for the family (Ragul sets these up beside Appa). Plain list,
 /// nothing hidden. Appa can open it too; nothing here happens behind his back.
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.embedded = false});
+
+  /// Shown as a tab on the family phone.
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -21,10 +25,26 @@ class SettingsScreen extends StatelessWidget {
 
     return AppScreen(
       title: 'அமைப்புகள்',
+      bare: embedded,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (appa) ...[
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const ReviewScreen())),
+              icon: const Icon(Icons.insights, size: 28),
+              label: const Text('வாராந்திர ஆய்வு (ஞாயிறு)'),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SharingScreen())),
+              icon: const Icon(Icons.visibility, size: 28),
+              label: const Text('குடும்பம் என்ன பார்க்கிறது'),
+            ),
             _Section('பேச வேண்டியவர்கள்'),
             Text(
               'தினமும் ஒருவரை அழைக்க நினைவூட்டும். நீண்ட நாள் பேசாதவர் முதலில் வருவார்.',

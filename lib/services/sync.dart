@@ -45,6 +45,52 @@ abstract class FamilySync {
     required String authorName,
   });
   Future<String> signedUrl(String remotePath);
+
+  // ---------------------------------------------------------- Phase 2
+
+  /// Appa's phone: what he agreed to share. Revoking clears that data.
+  Future<void> setSharing(SharingSettings s);
+
+  /// Family phone: what Appa has agreed to share.
+  Future<SharingSettings> fetchSharing();
+
+  // Appa side mirrors (only called while that item is shared)
+  Future<void> upsertHealth(List<HealthEntry> entries);
+  Future<void> deleteHealth(String id);
+  Future<void> upsertSleep(List<SleepEntry> entries);
+  Future<void> upsertPlan(List<PlanItem> items);
+  Future<void> deletePlan(String id);
+
+  /// Removes everything of one kind ('health', 'sleep', 'plan').
+  Future<void> clearShared(String kind);
+
+  // Family reads
+  Future<List<HealthEntry>> fetchHealth();
+  Future<List<SleepEntry>> fetchSleep();
+  Future<List<PlanItem>> fetchPlan();
+
+  /// Family phone: one plan item a day for Appa (a request, not an order).
+  Future<void> sendPlanRequest({
+    required String day,
+    required String text,
+    required String authorName,
+  });
+
+  /// Appa's phone: fetch and remove pending plan requests.
+  Future<List<PlanItem>> takePlanRequests();
+
+  // Question board
+  Future<void> askQuestion({
+    required String id,
+    String? text,
+    String? localAudioPath,
+    required String authorName,
+  });
+  Future<List<FamilyQuestion>> fetchQuestions();
+  Future<String> answerQuestion({
+    required String questionId,
+    required String localPath,
+  });
 }
 
 class RemoteStory {
@@ -266,6 +312,266 @@ class SupabaseFamilySync implements FamilySync {
   @override
   Future<String> signedUrl(String remotePath) =>
       _c.storage.from(bucket).createSignedUrl(remotePath, 60 * 60);
+
+  // ---------------------------------------------------------- Phase 2
+
+  @override
+  Future<void> setSharing(SharingSettings s) async {
+    await _c.from('sharing').upsert({
+      'household_id': _hh,
+      'health': s.health,
+      'sleep': s.sleep,
+      'plan': s.plan,
+    });
+    if (!s.health) await clearShared('health');
+    if (!s.sleep) await clearShared('sleep');
+    if (!s.plan) await clearShared('plan');
+  }
+
+  @override
+  Future<SharingSettings> fetchSharing() async {
+    final row = await _c
+        .from('sharing')
+        .select('health, sleep, plan')
+        .eq('household_id', _hh)
+        .maybeSingle();
+    if (row == null) return const SharingSettings();
+    return SharingSettings.fromJson(row);
+  }
+
+  @override
+  Future<void> upsertHealth(List<HealthEntry> entries) async {
+    if (entries.isEmpty) return;
+    await _c.from('health_entries').upsert([
+      for (final e in entries)
+        {
+          'id': e.id,
+          'household_id': _hh,
+          'at': e.at.toUtc().toIso8601String(),
+          'kind': e.kind.name,
+          'value': e.value,
+          'value2': e.value2,
+        },
+    ]);
+  }
+
+  @override
+  Future<void> deleteHealth(String id) async {
+    await _c.from('health_entries').delete().eq('id', id);
+  }
+
+  @override
+  Future<void> upsertSleep(List<SleepEntry> entries) async {
+    if (entries.isEmpty) return;
+    await _c.from('sleep_entries').upsert([
+      for (final e in entries)
+        {
+          'household_id': _hh,
+          'day': e.day,
+          'rating': e.rating.name,
+          'recorded_at': e.recordedAt.toUtc().toIso8601String(),
+        },
+    ], onConflict: 'household_id,day');
+  }
+
+  @override
+  Future<void> upsertPlan(List<PlanItem> items) async {
+    if (items.isEmpty) return;
+    await _c.from('plan_items').upsert([
+      for (final p in items)
+        {
+          'id': p.id,
+          'household_id': _hh,
+          'day': p.day,
+          'text': p.text,
+          'done': p.done,
+          'added_by': p.addedBy,
+          'created_at': p.createdAt.toUtc().toIso8601String(),
+        },
+    ]);
+  }
+
+  @override
+  Future<void> deletePlan(String id) async {
+    await _c.from('plan_items').delete().eq('id', id);
+  }
+
+  @override
+  Future<void> clearShared(String kind) async {
+    final table = switch (kind) {
+      'health' => 'health_entries',
+      'sleep' => 'sleep_entries',
+      'plan' => 'plan_items',
+      _ => throw ArgumentError(kind),
+    };
+    await _c.from(table).delete().eq('household_id', _hh);
+  }
+
+  @override
+  Future<List<HealthEntry>> fetchHealth() async {
+    final rows = await _c
+        .from('health_entries')
+        .select('id, at, kind, value, value2')
+        .eq('household_id', _hh)
+        .order('at');
+    return [
+      for (final r in rows)
+        HealthEntry(
+          id: r['id'] as String,
+          at: DateTime.parse(r['at'] as String).toLocal(),
+          kind: HealthKind.values.byName(r['kind'] as String),
+          value: r['value'] as int,
+          value2: r['value2'] as int?,
+        ),
+    ];
+  }
+
+  @override
+  Future<List<SleepEntry>> fetchSleep() async {
+    final rows = await _c
+        .from('sleep_entries')
+        .select('day, rating, recorded_at')
+        .eq('household_id', _hh)
+        .order('day');
+    return [
+      for (final r in rows)
+        SleepEntry(
+          day: r['day'] as String,
+          rating: SleepRating.values.byName(r['rating'] as String),
+          recordedAt: DateTime.parse(r['recorded_at'] as String).toLocal(),
+        ),
+    ];
+  }
+
+  @override
+  Future<List<PlanItem>> fetchPlan() async {
+    final rows = await _c
+        .from('plan_items')
+        .select('id, day, text, done, added_by, created_at')
+        .eq('household_id', _hh)
+        .order('created_at');
+    return [for (final r in rows) _planFromRow(r)];
+  }
+
+  PlanItem _planFromRow(Map<String, dynamic> r) => PlanItem(
+    id: r['id'] as String,
+    day: r['day'] as String,
+    text: r['text'] as String? ?? '',
+    done: r['done'] as bool? ?? false,
+    addedBy: (r['added_by'] ?? r['author_name']) as String?,
+    createdAt: DateTime.parse(r['created_at'] as String).toLocal(),
+  );
+
+  @override
+  Future<void> sendPlanRequest({
+    required String day,
+    required String text,
+    required String authorName,
+  }) async {
+    await _c.from('plan_requests').insert({
+      'household_id': _hh,
+      'day': day,
+      'text': text,
+      'author_name': authorName,
+    });
+  }
+
+  @override
+  Future<List<PlanItem>> takePlanRequests() async {
+    final rows = await _c
+        .from('plan_requests')
+        .select('id, day, text, author_name, created_at')
+        .eq('household_id', _hh)
+        .order('created_at');
+    final items = [for (final r in rows) _planFromRow(r)];
+    if (items.isNotEmpty) {
+      await _c.from('plan_requests').delete().inFilter('id', [
+        for (final i in items) i.id,
+      ]);
+    }
+    return items;
+  }
+
+  @override
+  Future<void> askQuestion({
+    required String id,
+    String? text,
+    String? localAudioPath,
+    required String authorName,
+  }) async {
+    String? path;
+    if (localAudioPath != null) {
+      path = '$_hh/questions/$id.m4a';
+      await _c.storage
+          .from(bucket)
+          .upload(
+            path,
+            File(localAudioPath),
+            fileOptions: const FileOptions(
+              contentType: 'audio/mp4',
+              upsert: true,
+            ),
+          );
+    }
+    await _c.from('questions').insert({
+      'id': id,
+      'household_id': _hh,
+      'author_name': authorName,
+      'text': text,
+      'audio_path': path,
+    });
+  }
+
+  @override
+  Future<List<FamilyQuestion>> fetchQuestions() async {
+    final rows = await _c
+        .from('questions')
+        .select(
+          'id, author_name, text, audio_path, answer_path, answered_at, created_at',
+        )
+        .eq('household_id', _hh)
+        .order('created_at', ascending: false);
+    return [
+      for (final r in rows)
+        FamilyQuestion(
+          id: r['id'] as String,
+          authorName: r['author_name'] as String? ?? '',
+          createdAt: DateTime.parse(r['created_at'] as String).toLocal(),
+          text: r['text'] as String?,
+          remoteAudioPath: r['audio_path'] as String?,
+          answerRemotePath: r['answer_path'] as String?,
+          answeredAt: r['answered_at'] == null
+              ? null
+              : DateTime.parse(r['answered_at'] as String).toLocal(),
+        ),
+    ];
+  }
+
+  @override
+  Future<String> answerQuestion({
+    required String questionId,
+    required String localPath,
+  }) async {
+    final path = '$_hh/answers/$questionId.m4a';
+    await _c.storage
+        .from(bucket)
+        .upload(
+          path,
+          File(localPath),
+          fileOptions: const FileOptions(
+            contentType: 'audio/mp4',
+            upsert: true,
+          ),
+        );
+    await _c
+        .from('questions')
+        .update({
+          'answer_path': path,
+          'answered_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', questionId);
+    return path;
+  }
 }
 
 /// Used when sync is not set up. Every remote call is a quiet no-op.
@@ -307,4 +613,49 @@ class NoFamilySync implements FamilySync {
   @override
   Future<String> signedUrl(String remotePath) =>
       throw UnsupportedError('no sync');
+
+  @override
+  Future<void> setSharing(SharingSettings s) async {}
+  @override
+  Future<SharingSettings> fetchSharing() async => const SharingSettings();
+  @override
+  Future<void> upsertHealth(List<HealthEntry> entries) async {}
+  @override
+  Future<void> deleteHealth(String id) async {}
+  @override
+  Future<void> upsertSleep(List<SleepEntry> entries) async {}
+  @override
+  Future<void> upsertPlan(List<PlanItem> items) async {}
+  @override
+  Future<void> deletePlan(String id) async {}
+  @override
+  Future<void> clearShared(String kind) async {}
+  @override
+  Future<List<HealthEntry>> fetchHealth() async => [];
+  @override
+  Future<List<SleepEntry>> fetchSleep() async => [];
+  @override
+  Future<List<PlanItem>> fetchPlan() async => [];
+  @override
+  Future<void> sendPlanRequest({
+    required String day,
+    required String text,
+    required String authorName,
+  }) => throw UnsupportedError('no sync');
+  @override
+  Future<List<PlanItem>> takePlanRequests() async => [];
+  @override
+  Future<void> askQuestion({
+    required String id,
+    String? text,
+    String? localAudioPath,
+    required String authorName,
+  }) => throw UnsupportedError('no sync');
+  @override
+  Future<List<FamilyQuestion>> fetchQuestions() async => [];
+  @override
+  Future<String> answerQuestion({
+    required String questionId,
+    required String localPath,
+  }) => throw UnsupportedError('no sync');
 }

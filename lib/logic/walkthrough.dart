@@ -2,22 +2,15 @@
 ///
 /// Walkthroughs are data, not LLM output, so they are deterministic and never
 /// confidently wrong (roadmap: "Walkthroughs: scripted step engine"). Each
-/// step names the mock screen to show, what to say aloud, and the one action
-/// that moves forward. Any other tap gets a gentle pointer to the right
-/// button, never a "wrong".
+/// step describes one mock screen as a list of plain elements, what to say
+/// aloud, and the one action that moves forward. Any other action gets a
+/// gentle pointer to the right control, never a "wrong".
+///
+/// Mock screens are generic drawings of the *shape* of each flow, clearly
+/// labelled as practice. They copy no real app's branding.
 library;
 
-/// The mock screens of the practice payment app.
-enum MockScreen {
-  intro,
-  home,
-  contacts,
-  amount,
-  confirm,
-  pin,
-  success,
-  balance,
-}
+// ------------------------------------------------------------------ actions
 
 /// What the learner did on a mock screen.
 sealed class MockAction {
@@ -30,10 +23,22 @@ class Tap extends MockAction {
   final String target;
 }
 
-/// Typed an amount (rupees) and pressed continue.
-class EnterAmount extends MockAction {
-  const EnterAmount(this.rupees);
-  final int rupees;
+/// Pressed and held the control with this id (WhatsApp voice notes).
+class LongPress extends MockAction {
+  const LongPress(this.target);
+  final String target;
+}
+
+/// Typed a number and pressed continue.
+class EnterNumber extends MockAction {
+  const EnterNumber(this.value);
+  final int value;
+}
+
+/// Typed some text and pressed continue.
+class EnterText extends MockAction {
+  const EnterText(this.text);
+  final String text;
 }
 
 /// Entered a PIN of this many digits and pressed the tick.
@@ -42,46 +47,247 @@ class EnterPin extends MockAction {
   final int digits;
 }
 
-/// One step of a walkthrough.
+enum Expect { tap, longPress, number, text, pin }
+
+// ------------------------------------------------------------------ mock UI
+
+/// One element of a mock screen. The renderer draws these top to bottom.
+/// Text may contain {amount}, {balance}, {name} and {text} placeholders.
+sealed class MockElement {
+  const MockElement();
+}
+
+/// Large heading inside the mock app.
+class MHeader extends MockElement {
+  const MHeader(this.title, [this.subtitle]);
+  final String title;
+  final String? subtitle;
+}
+
+/// A button. [kind] picks its colour.
+class MButton extends MockElement {
+  const MButton(
+    this.id,
+    this.label, {
+    this.icon = 'arrow',
+    this.kind = MKind.primary,
+  });
+  final String id;
+  final String label;
+  final String icon;
+  final MKind kind;
+}
+
+enum MKind { primary, success, danger, plain }
+
+/// A row in a list: a chat, a contact, a bus, a dish.
+class MTile extends MockElement {
+  const MTile(
+    this.id,
+    this.title, {
+    this.subtitle,
+    this.leading,
+    this.trailing,
+  });
+  final String id;
+  final String title;
+  final String? subtitle;
+
+  /// A letter or short word shown in the circle on the left.
+  final String? leading;
+
+  /// Short text on the right (a price, a time).
+  final String? trailing;
+}
+
+/// Big square icon buttons, two to a row.
+class MGrid extends MockElement {
+  const MGrid(this.items);
+  final List<MButton> items;
+}
+
+/// A row of small icon buttons, like a chat's top bar.
+class MIconBar extends MockElement {
+  const MIconBar(this.title, this.items);
+  final String title;
+  final List<MButton> items;
+}
+
+/// A chat bubble.
+class MBubble extends MockElement {
+  const MBubble(
+    this.text, {
+    this.fromMe = false,
+    this.author,
+    this.voice = false,
+  });
+  final String text;
+  final bool fromMe;
+  final String? author;
+  final bool voice;
+}
+
+/// A chat input bar with attach, camera and a hold-to-record mic.
+class MComposer extends MockElement {
+  const MComposer({
+    this.attachId = 'attach',
+    this.cameraId = 'camera',
+    this.micId = 'mic',
+  });
+  final String attachId;
+  final String cameraId;
+  final String micId;
+}
+
+/// A big value, like an amount or a balance.
+class MBig extends MockElement {
+  const MBig(this.text, [this.caption]);
+  final String text;
+  final String? caption;
+}
+
+/// A plain note inside the mock app. [warning] draws it in red.
+class MNote extends MockElement {
+  const MNote(this.text, {this.warning = false});
+  final String text;
+  final bool warning;
+}
+
+/// An SMS as it appears in the messages app.
+class MSms extends MockElement {
+  const MSms(this.from, this.text);
+  final String from;
+  final String text;
+}
+
+/// A tappable QR code (stands in for pointing the camera).
+class MQr extends MockElement {
+  const MQr(this.id, this.caption);
+  final String id;
+  final String caption;
+}
+
+/// A big success tick.
+class MTick extends MockElement {
+  const MTick();
+}
+
+/// A number field + continue button. Completes [Expect.number].
+class MNumberInput extends MockElement {
+  const MNumberInput({
+    this.prefix = '₹ ',
+    this.hint = '0',
+    this.button = 'அடுத்து',
+  });
+  final String prefix;
+  final String hint;
+  final String button;
+}
+
+/// A text field + continue button. Completes [Expect.text].
+class MTextInput extends MockElement {
+  const MTextInput({required this.hint, this.button = 'தேடு'});
+  final String hint;
+  final String button;
+}
+
+/// A large keypad for a UPI PIN. Completes [Expect.pin].
+class MPinPad extends MockElement {
+  const MPinPad();
+}
+
+/// What a mock screen looks like.
+class MockView {
+  const MockView({
+    required this.app,
+    required this.elements,
+    this.color = 0xFF0B5D4B,
+  });
+
+  /// Shown in the mock app's top bar, e.g. "பயிற்சி: WhatsApp".
+  final String app;
+  final int color;
+  final List<MockElement> elements;
+}
+
+// ------------------------------------------------------------------ script
+
+/// What happens when a step's action is done.
+enum StepEffect { none, debitAmount }
+
 class WalkStep {
   const WalkStep({
-    required this.screen,
+    required this.view,
     required this.say,
     required this.expects,
     this.target,
     this.hint,
+    this.hints = const {},
+    this.minNumber = 1,
+    this.maxIsBalance = false,
+    this.setAmount,
+    this.effect = StepEffect.none,
   });
 
-  final MockScreen screen;
+  final MockView view;
 
   /// Spoken aloud (Tamil) when the step starts, and shown in large text.
   final String say;
 
-  /// Which kind of action moves on.
-  final Type expects;
+  final Expect expects;
 
-  /// For [Tap] steps: the control id that must be tapped. It is highlighted.
+  /// For tap and long-press steps: the control that moves on. Highlighted.
   final String? target;
 
-  /// Said when he does something else. Points at the right control; never
-  /// says he was wrong.
+  /// Said when he does something else. Points at the right control.
   final String? hint;
+
+  /// Said instead of [hint] when he taps a particular other control, to
+  /// explain why (used in the safety walkthroughs).
+  final Map<String, String> hints;
+
+  /// For number steps.
+  final int minNumber;
+  final bool maxIsBalance;
+
+  /// Fixes {amount} when the step starts (a ticket with a set price).
+  final int? setAmount;
+
+  final StepEffect effect;
 }
+
+enum WalkCategory { money, whatsapp, safety, travel, food, maps }
+
+const categoryTitles = {
+  WalkCategory.whatsapp: 'WhatsApp',
+  WalkCategory.money: 'பணம் (UPI)',
+  WalkCategory.safety: 'பாதுகாப்பு',
+  WalkCategory.travel: 'பயணம்',
+  WalkCategory.food: 'உணவு',
+  WalkCategory.maps: 'வழி கண்டுபிடிக்க',
+};
 
 class Walkthrough {
   const Walkthrough({
     required this.id,
     required this.title,
     required this.summary,
+    required this.category,
     required this.steps,
+    this.recipient = practiceRecipient,
   });
+
   final String id;
   final String title;
   final String summary;
+  final WalkCategory category;
   final List<WalkStep> steps;
+
+  /// Fills {name}.
+  final String recipient;
 }
 
-/// Name of the pretend person in the practice contact list.
+/// Name of the pretend person in practice contact lists.
 const practiceRecipient = 'முருகன்';
 const practiceStartBalance = 5000;
 
@@ -97,183 +303,126 @@ class StepResult {
 /// Runs one walkthrough over a fake balance. Moves no money: there is no
 /// network or payment code anywhere in this module.
 class WalkthroughSession {
-  WalkthroughSession(this.walkthrough, {this.balance = practiceStartBalance});
+  WalkthroughSession(this.walkthrough, {this.balance = practiceStartBalance}) {
+    _enter();
+  }
 
   final Walkthrough walkthrough;
   int balance;
   int index = 0;
   int? amount;
-  int pinDigits = 0;
+  String text = '';
+  bool _done = false;
 
   WalkStep get step => walkthrough.steps[index];
-  bool _doneTapped = false;
 
   /// True once the last step's action has been done.
-  bool get completed => _doneTapped;
+  bool get completed => _done;
+
+  void _enter() {
+    final set = step.setAmount;
+    if (set != null) amount = set;
+  }
+
+  StepResult _hint([String? target]) {
+    final s = step;
+    final special = target == null ? null : s.hints[target];
+    final m = special ?? s.hint;
+    return StepResult(advanced: false, message: m == null ? null : fill(m));
+  }
 
   /// Handle [action] on the current step.
   StepResult handle(MockAction action) {
+    if (_done) return const StepResult(advanced: false);
     final s = step;
-    final matches = switch (action) {
-      Tap(:final target) => s.expects == Tap && target == s.target,
-      EnterAmount(:final rupees) => s.expects == EnterAmount && rupees > 0,
-      EnterPin(:final digits) =>
-        s.expects == EnterPin && (digits == 4 || digits == 6),
-    };
 
-    if (!matches) {
-      if (action is EnterAmount && s.expects == EnterAmount) {
+    switch ((s.expects, action)) {
+      case (Expect.tap, Tap(:final target)):
+        if (target != s.target) return _hint(target);
+      case (Expect.longPress, LongPress(:final target)):
+        if (target != s.target) return _hint(target);
+      case (Expect.longPress, Tap(:final target)) when target == s.target:
         return const StepResult(
           advanced: false,
-          message: 'ஒரு தொகையை எண்களில் போடுங்கள். உதாரணமாக 100.',
+          message: 'தொட்டவுடன் விரலை எடுக்க வேண்டாம். அழுத்திப் பிடித்துக்கொண்டே இருங்கள்.',
         );
-      }
-      if (action is EnterPin && s.expects == EnterPin) {
-        return const StepResult(
-          advanced: false,
-          message: 'PIN நான்கு அல்லது ஆறு எண்கள். இது பயிற்சி, எந்த எண்ணும் போடலாம்.',
-        );
-      }
-      return StepResult(
-        advanced: false,
-        message: s.hint == null ? null : _fill(s.hint!),
-      );
+      case (Expect.number, EnterNumber(:final value)):
+        if (value < s.minNumber) {
+          return const StepResult(
+            advanced: false,
+            message: 'ஒரு தொகையை எண்களில் போடுங்கள். உதாரணமாக 100.',
+          );
+        }
+        if (s.maxIsBalance && value > balance) {
+          return const StepResult(
+            advanced: false,
+            message: 'இருப்பை விடக் குறைவான தொகை போடுங்கள்.',
+          );
+        }
+        amount = value;
+      case (Expect.text, EnterText(text: final t)):
+        if (t.trim().isEmpty) {
+          return const StepResult(
+            advanced: false,
+            message: 'ஏதாவது ஒரு சொல்லைப் போட்டு அழுத்துங்கள்.',
+          );
+        }
+        text = t.trim();
+      case (Expect.pin, EnterPin(:final digits)):
+        if (digits != 4 && digits != 6) {
+          return const StepResult(
+            advanced: false,
+            message: 'PIN நான்கு அல்லது ஆறு எண்கள். இது பயிற்சி, எந்த எண்ணும் போடலாம்.',
+          );
+        }
+      case (_, Tap(:final target)):
+        return _hint(target);
+      case (_, LongPress(:final target)):
+        return _hint(target);
+      default:
+        return _hint();
     }
 
-    if (action is EnterAmount) {
-      if (action.rupees > balance) {
-        return const StepResult(
-          advanced: false,
-          message: 'இருப்பை விடக் குறைவான தொகை போடுங்கள்.',
-        );
-      }
-      amount = action.rupees;
-    }
-    if (action is EnterPin) {
-      pinDigits = action.digits;
-      // The pretend payment "happens" only in this practice object.
-      if (walkthrough.steps.any((st) => st.screen == MockScreen.amount) &&
-          amount != null) {
-        balance -= amount!;
-      }
+    // The pretend payment "happens" only in this practice object.
+    if (s.effect == StepEffect.debitAmount && amount != null) {
+      balance -= amount!;
     }
 
     if (index == walkthrough.steps.length - 1) {
-      _doneTapped = true;
+      _done = true;
       return const StepResult(advanced: true);
     }
     index++;
+    _enter();
     return StepResult(advanced: true, message: narration(step));
   }
 
-  /// The narration for [s], with the practice amounts filled in.
-  String narration(WalkStep s) => _fill(s.say);
+  /// The narration for [s], with the practice values filled in.
+  String narration(WalkStep s) => fill(s.say);
 
-  String _fill(String text) => text
+  String fill(String t) => t
       .replaceAll('{amount}', '${amount ?? 0}')
       .replaceAll('{balance}', '$balance')
-      .replaceAll('{name}', practiceRecipient);
+      .replaceAll('{name}', walkthrough.recipient)
+      .replaceAll('{text}', text);
 
   /// Start again from the first step, with the balance reset. Unlimited.
   void restart() {
     index = 0;
     amount = null;
-    pinDigits = 0;
+    text = '';
     balance = practiceStartBalance;
-    _doneTapped = false;
+    _done = false;
+    _enter();
   }
 }
 
-/// Phase 1 walkthroughs. Scripts in plain spoken Tamil; the Tamil content
-/// writer and Appa should review every line before it ships to him.
-const sendMoneyWalkthrough = Walkthrough(
-  id: 'upi-send',
-  title: 'பணம் அனுப்புவது',
-  summary: 'GPay போன்ற UPI ஆப்பில் ஒருவருக்குப் பணம் அனுப்பும் முறை',
-  steps: [
-    WalkStep(
-      screen: MockScreen.intro,
-      say: 'இது பயிற்சி மட்டும். உண்மையான பணம் எங்கும் போகாது. எத்தனை தடவை வேண்டுமானாலும் செய்து பார்க்கலாம். தொடங்க, "தொடங்கு" பொத்தானை அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'start',
-      hint: 'கீழே உள்ள "தொடங்கு" பொத்தானை அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.home,
-      say: 'இது ஆப்பின் முதல் பக்கம். GPay-யிலும் இதே மாதிரி இருக்கும். ஒருவருக்குப் பணம் அனுப்ப, "பணம் அனுப்பு" என்ற பொத்தானை அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'pay',
-      hint: 'மஞ்சள் நிறத்தில் மின்னும் "பணம் அனுப்பு" பொத்தானை அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.contacts,
-      say: 'இப்போது யாருக்கு அனுப்ப வேண்டுமோ, அவர் பெயரை அழுத்துங்கள். இங்கே {name} பெயரை அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'contact',
-      hint: '{name} என்ற பெயரை அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.amount,
-      say: 'எவ்வளவு பணம் அனுப்ப வேண்டும் என்று எண்களில் போடுங்கள். பிறகு "அடுத்து" அழுத்துங்கள்.',
-      expects: EnterAmount,
-      hint: 'ஒரு தொகையை எண்களில் போட்டு "அடுத்து" அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.confirm,
-      say: 'அனுப்பும் முன் இரண்டு விஷயம் பாருங்கள்: பெயர் {name} தானா, தொகை {amount} ரூபாய் தானா. சரி என்றால், "அனுப்பு" அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'send',
-      hint: 'பெயரும் தொகையும் சரியா என்று பார்த்து, "அனுப்பு" அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.pin,
-      say: 'இப்போது UPI PIN கேட்கும். இது உங்கள் ரகசிய எண். வங்கியிலிருந்து பேசுவதாகச் சொன்னாலும், யாரிடமும் இதைச் சொல்லக் கூடாது. இது பயிற்சி, அதனால் எந்த நான்கு எண்ணும் போடலாம்.',
-      expects: EnterPin,
-      hint: 'நான்கு எண்கள் போட்டு, சரி குறியை அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.success,
-      say: '{amount} ரூபாய் {name}-க்குப் போய்விட்டது என்று காட்டுகிறது. பச்சை சரி குறி வந்தால் பணம் போய்விட்டது. பயிற்சி இருப்பு இப்போது {balance} ரூபாய். முடிக்க "முடிந்தது" அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'done',
-      hint: '"முடிந்தது" பொத்தானை அழுத்துங்கள்.',
-    ),
-  ],
-);
-
-const checkBalanceWalkthrough = Walkthrough(
-  id: 'upi-balance',
-  title: 'இருப்பு பார்ப்பது',
-  summary: 'வங்கிக் கணக்கில் எவ்வளவு பணம் இருக்கிறது என்று பார்க்கும் முறை',
-  steps: [
-    WalkStep(
-      screen: MockScreen.intro,
-      say: 'இது பயிற்சி மட்டும். வங்கிக் கணக்கில் எவ்வளவு பணம் இருக்கிறது என்று பார்க்கக் கற்றுக்கொள்வோம். "தொடங்கு" அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'start',
-      hint: 'கீழே உள்ள "தொடங்கு" பொத்தானை அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.home,
-      say: 'முதல் பக்கத்தில் "இருப்பு பார்" என்ற பொத்தானை அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'balance',
-      hint: 'மஞ்சள் நிறத்தில் மின்னும் "இருப்பு பார்" பொத்தானை அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.pin,
-      say: 'இருப்பு பார்க்கவும் UPI PIN கேட்கும். இதை யாரிடமும் சொல்லக் கூடாது. பயிற்சிக்கு எந்த நான்கு எண்ணும் போடுங்கள்.',
-      expects: EnterPin,
-      hint: 'நான்கு எண்கள் போட்டு, சரி குறியை அழுத்துங்கள்.',
-    ),
-    WalkStep(
-      screen: MockScreen.balance,
-      say: 'உங்கள் பயிற்சிக் கணக்கில் {balance} ரூபாய் இருக்கிறது என்று காட்டுகிறது. முடிக்க "முடிந்தது" அழுத்துங்கள்.',
-      expects: Tap,
-      target: 'done',
-      hint: '"முடிந்தது" பொத்தானை அழுத்துங்கள்.',
-    ),
-  ],
-);
-
-const phaseOneWalkthroughs = [sendMoneyWalkthrough, checkBalanceWalkthrough];
+/// The action that moves [step] forward, for tests and for a future
+/// "show me" demo mode.
+MockAction goldenAction(WalkStep step) => switch (step.expects) {
+  Expect.tap => Tap(step.target!),
+  Expect.longPress => LongPress(step.target!),
+  Expect.number => EnterNumber(step.minNumber < 100 ? 100 : step.minNumber),
+  Expect.text => const EnterText('கோயில்'),
+  Expect.pin => const EnterPin(4),
+};

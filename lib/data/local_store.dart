@@ -28,6 +28,12 @@ class LocalStore {
   static const _kSyncKey = 'syncKey';
   static const _kHousehold = 'householdCode';
   static const _kSeenFamilyStories = 'seenFamilyStories';
+  static const _kPlan = 'planItems';
+  static const _kHealth = 'healthEntries';
+  static const _kSharing = 'sharing';
+  static const _kQuestions = 'familyQuestions';
+  static const _kRealWorld = 'realWorldDone';
+  static const _kScamShared = 'scamShared';
 
   DeviceRole? get role {
     final r = _prefs.getString(_kRole);
@@ -121,4 +127,46 @@ class LocalStore {
     await _prefs.remove(_kSyncKey);
     await _prefs.remove(_kHousehold);
   }
+
+  // ------------------------------------------------------------ Phase 2
+
+  List<PlanItem> get planItems => _list(_kPlan, PlanItem.fromJson);
+  Future<void> savePlanItems(List<PlanItem> p) =>
+      _saveList(_kPlan, p.map((e) => e.toJson()).toList());
+
+  List<HealthEntry> get healthEntries => _list(_kHealth, HealthEntry.fromJson);
+  Future<void> saveHealthEntries(List<HealthEntry> h) =>
+      _saveList(_kHealth, h.map((e) => e.toJson()).toList());
+
+  List<FamilyQuestion> get questions =>
+      _list(_kQuestions, FamilyQuestion.fromJson);
+  Future<void> saveQuestions(List<FamilyQuestion> q) =>
+      _saveList(_kQuestions, q.map((e) => e.toJson()).toList());
+
+  SharingSettings get sharing {
+    final raw = _prefs.getString(_kSharing);
+    if (raw == null) return const SharingSettings();
+    try {
+      return SharingSettings.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      );
+    } on FormatException {
+      return const SharingSettings();
+    }
+  }
+
+  Future<void> saveSharing(SharingSettings s) =>
+      _prefs.setString(_kSharing, jsonEncode(s.toJson()));
+
+  /// Walkthroughs he has since done for real, by his own say-so.
+  Set<String> get realWorldDone =>
+      (_prefs.getStringList(_kRealWorld) ?? []).toSet();
+  Future<void> saveRealWorldDone(Set<String> ids) =>
+      _prefs.setStringList(_kRealWorld, ids.toList());
+
+  /// Scam stories he has forwarded (ids).
+  Set<String> get scamShared =>
+      (_prefs.getStringList(_kScamShared) ?? []).toSet();
+  Future<void> saveScamShared(Set<String> ids) =>
+      _prefs.setStringList(_kScamShared, ids.toList());
 }

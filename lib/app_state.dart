@@ -2,10 +2,13 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import 'data/local_store.dart';
+import 'data/scam_stories.dart';
 import 'data/story_prompts.dart';
 import 'logic/daily_picker.dart';
+import 'logic/phase2.dart';
 import 'models/models.dart';
 import 'services/audio.dart';
+import 'services/dictation.dart';
 import 'services/phone.dart';
 import 'services/reminders.dart';
 import 'services/speech.dart';
@@ -21,6 +24,8 @@ class AppState extends ChangeNotifier {
     required this.reminders,
     required this.phone,
     required this.sync,
+    required this.dictation,
+    required this.sharer,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now {
     _load();
@@ -32,6 +37,8 @@ class AppState extends ChangeNotifier {
   final Reminders reminders;
   final Phone phone;
   final FamilySync sync;
+  final Dictation dictation;
+  final Sharer sharer;
   final DateTime Function() _clock;
   static const _uuid = Uuid();
 
@@ -45,6 +52,12 @@ class AppState extends ChangeNotifier {
   late List<SleepEntry> sleepEntries;
   late ReminderSettings reminderSettings;
   late Set<String> completedWalkthroughs;
+  late List<PlanItem> planItems;
+  late List<HealthEntry> healthEntries;
+  late List<FamilyQuestion> questions;
+  late SharingSettings sharing;
+  late Set<String> realWorldDone;
+  late Set<String> scamShared;
 
   /// Last sync problem, shown quietly in settings, never to Appa.
   String? syncError;
@@ -59,6 +72,13 @@ class AppState extends ChangeNotifier {
     sleepEntries = store.sleepEntries;
     reminderSettings = store.reminders;
     completedWalkthroughs = store.completedWalkthroughs;
+    planItems = store.planItems;
+    healthEntries = store.healthEntries;
+    questions = store.questions
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    sharing = store.sharing;
+    realWorldDone = store.realWorldDone;
+    scamShared = store.scamShared;
   }
 
   // ---------------------------------------------------------------- setup
@@ -250,6 +270,10 @@ class AppState extends ChangeNotifier {
     ];
     await store.saveSleepEntries(sleepEntries);
     notifyListeners();
+    await _mirror(
+      'sleep',
+      () => sync.upsertSleep(sleepEntries.where((e) => e.day == key).toList()),
+    );
   }
 
   List<SleepRating?> get lastWeekSleep => sleepWindow(now, sleepEntries);
@@ -286,7 +310,12 @@ class AppState extends ChangeNotifier {
       await sync.connect(url: url, key: key);
       await sync.resume(householdCode: code);
       syncError = null;
-      if (role == DeviceRole.appa) await pullReplies();
+      if (role == DeviceRole.appa) {
+        await pullReplies();
+        await pullPhase2();
+      } else {
+        await loadFamilyExtras();
+      }
     } catch (e) {
       syncError = '$e';
     }
@@ -427,6 +456,356 @@ class AppState extends ChangeNotifier {
         authorName: displayName,
       );
       await loadFamilyStories();
+      return true;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // ================================================================ Phase 2
+
+  /// Runs a mirror write only while that kind is shared and sync is on.
+  /// Failures are kept quiet (offline-first) and retried on the next push.
+  Future<void> _mirror(String kind, Future<void> Function() write) async {
+    if (role != DeviceRole.appa || !sync.connected) return;
+    final on = switch (kind) {
+      'health' => sharing.health,
+      'sleep' => sharing.sleep,
+      'plan' => sharing.plan,
+      _ => true,
+    };
+    if (!on) return;
+    try {
+      await write();
+    } catch (e) {
+      syncError = '$e';
+    }
+  }
+
+  /// Appa's phone: bring in family questions and plan requests, and push
+  /// whatever he has shared.
+  Future<void> pullPhase2() async {
+    if (!sync.connected || role != DeviceRole.appa) return;
+    try {
+      await sync.setSharing(sharing);
+      final requests = await sync.takePlanRequests();
+      for (final r in requests) {
+        if (familyCanAdd(r.addedBy ?? '', r.day, planItems)) {
+          planItems = [...planItems, r];
+        }
+      }
+      if (requests.isNotEmpty) await store.savePlanItems(planItems);
+      await _pullQuestions();
+      await _pushShared();
+      syncError = null;
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  Future<void> _pushShared() async {
+    final since = dayKey(now.subtract(const Duration(days: 90)));
+    await _mirror('health', () => sync.upsertHealth(healthEntries));
+    await _mirror(
+      'sleep',
+      () => sync.upsertSleep(
+        sleepEntries.where((e) => e.day.compareTo(since) >= 0).toList(),
+      ),
+    );
+    await _mirror(
+      'plan',
+      () => sync.upsertPlan(
+        planItems.where((p) => p.day.compareTo(since) >= 0).toList(),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------- sharing
+
+  /// He turns each item on or off himself. Off deletes the family's copy.
+  Future<void> updateSharing(SharingSettings s) async {
+    sharing = s;
+    await store.saveSharing(s);
+    notifyListeners();
+    if (role == DeviceRole.appa && sync.connected) {
+      try {
+        await sync.setSharing(s);
+        await _pushShared();
+      } catch (e) {
+        syncError = '$e';
+      }
+      notifyListeners();
+    }
+  }
+
+  // ---------------------------------------------------------------- plan
+
+  String get todayKey => dayKey(now);
+  String get tomorrowKey => dayKey(now.add(const Duration(days: 1)));
+
+  List<PlanItem> planForDay(String day) => planFor(day, planItems);
+
+  Future<void> addPlanItem(String text, {String? day, String? addedBy}) async {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    final item = PlanItem(
+      id: _uuid.v4(),
+      day: day ?? todayKey,
+      text: t,
+      createdAt: now,
+      addedBy: addedBy,
+    );
+    planItems = [...planItems, item];
+    await store.savePlanItems(planItems);
+    notifyListeners();
+    await _mirror('plan', () => sync.upsertPlan([item]));
+  }
+
+  /// A family member adding on Appa's phone: one item a day each.
+  Future<bool> addFamilyPlanItem({
+    required String author,
+    required String text,
+  }) async {
+    final a = author.trim().isEmpty ? 'குடும்பம்' : author.trim();
+    if (!familyCanAdd(a, todayKey, planItems)) return false;
+    await addPlanItem(text, addedBy: a);
+    return true;
+  }
+
+  Future<void> togglePlanItem(String id) async {
+    PlanItem? changed;
+    planItems = [
+      for (final p in planItems)
+        if (p.id == id) changed = p.copyWith(done: !p.done) else p,
+    ];
+    await store.savePlanItems(planItems);
+    notifyListeners();
+    if (changed != null) {
+      await _mirror('plan', () => sync.upsertPlan([changed!]));
+    }
+  }
+
+  Future<void> removePlanItem(String id) async {
+    planItems = planItems.where((p) => p.id != id).toList();
+    await store.savePlanItems(planItems);
+    notifyListeners();
+    await _mirror('plan', () => sync.deletePlan(id));
+  }
+
+  /// Copy yesterday's own items (not family requests) to [day], unticked.
+  Future<int> repeatYesterday(String day) async {
+    final d = DateTime.parse(day);
+    final yesterday = dayKey(d.subtract(const Duration(days: 1)));
+    final existing = planForDay(day).map((p) => p.text).toSet();
+    final copy = planForDay(yesterday)
+        .where((p) => p.addedBy == null && !existing.contains(p.text));
+    var n = 0;
+    for (final p in copy) {
+      await addPlanItem(p.text, day: day);
+      n++;
+    }
+    return n;
+  }
+
+  // ---------------------------------------------------------------- health
+
+  /// Saves a reading; returns a gentle message instead if it looks mistyped.
+  Future<String?> addHealth(HealthKind kind, int? value, [int? value2]) async {
+    final problem = validateHealth(kind, value, value2);
+    if (problem != null) return problem;
+    final e = HealthEntry(
+      id: _uuid.v4(),
+      at: now,
+      kind: kind,
+      value: value!,
+      value2: value2,
+    );
+    healthEntries = [...healthEntries, e];
+    await store.saveHealthEntries(healthEntries);
+    notifyListeners();
+    await _mirror('health', () => sync.upsertHealth([e]));
+    return null;
+  }
+
+  Future<void> removeHealth(String id) async {
+    healthEntries = healthEntries.where((e) => e.id != id).toList();
+    await store.saveHealthEntries(healthEntries);
+    notifyListeners();
+    await _mirror('health', () => sync.deleteHealth(id));
+  }
+
+  List<HealthEntry> healthOf(HealthKind kind, {int days = 56}) =>
+      healthSeries(healthEntries, kind, now, days: days);
+
+  // ---------------------------------------------------------------- questions
+
+  int get unansweredQuestions => questions.where((q) => !q.answered).length;
+
+  /// A family member asking on Appa's phone (works with no internet).
+  Future<void> addLocalQuestion({
+    required String author,
+    String? text,
+    String? audioPath,
+  }) async {
+    if ((text == null || text.trim().isEmpty) && audioPath == null) return;
+    final q = FamilyQuestion(
+      id: _uuid.v4(),
+      authorName: author.trim().isEmpty ? 'குடும்பம்' : author.trim(),
+      createdAt: now,
+      text: text?.trim().isEmpty ?? true ? null : text!.trim(),
+      localAudioPath: audioPath,
+    );
+    questions = [q, ...questions];
+    await store.saveQuestions(questions);
+    notifyListeners();
+  }
+
+  Future<void> answerQuestion(String id, String audioPath) async {
+    questions = [
+      for (final q in questions)
+        q.id == id
+            ? q.copyWith(answerLocalPath: audioPath, answeredAt: now)
+            : q,
+    ];
+    await store.saveQuestions(questions);
+    notifyListeners();
+    if (sync.connected && role == DeviceRole.appa) {
+      final q = questions.firstWhere((x) => x.id == id);
+      if (q.remoteAudioPath != null || q.text != null) {
+        try {
+          final remote = await sync.answerQuestion(
+            questionId: id,
+            localPath: audioPath,
+          );
+          questions = [
+            for (final x in questions)
+              x.id == id ? x.copyWith(answerRemotePath: remote) : x,
+          ];
+          await store.saveQuestions(questions);
+        } catch (e) {
+          syncError = '$e';
+        }
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _pullQuestions() async {
+    final remote = await sync.fetchQuestions();
+    var next = [...questions];
+    for (final r in remote) {
+      final i = next.indexWhere((q) => q.id == r.id);
+      if (i >= 0) continue;
+      var q = r;
+      if (r.remoteAudioPath != null) {
+        final local = await audio.filePath('question-${r.id}.m4a');
+        await sync.downloadToFile(r.remoteAudioPath!, local);
+        q = q.copyWith(localAudioPath: local);
+      }
+      next.add(q);
+    }
+    // Answers recorded while offline: upload now.
+    for (final q in next.where(
+      (q) =>
+          q.answered && q.answerRemotePath == null && q.answerLocalPath != null,
+    )) {
+      if (!remote.any((r) => r.id == q.id)) continue;
+      final path = await sync.answerQuestion(
+        questionId: q.id,
+        localPath: q.answerLocalPath!,
+      );
+      next = [
+        for (final x in next)
+          x.id == q.id ? x.copyWith(answerRemotePath: path) : x,
+      ];
+    }
+    next.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    questions = next;
+    await store.saveQuestions(questions);
+  }
+
+  // ---------------------------------------------------------------- learning
+
+  Future<void> markRealWorldDone(String walkthroughId) async {
+    realWorldDone = {...realWorldDone, walkthroughId};
+    await store.saveRealWorldDone(realWorldDone);
+    notifyListeners();
+  }
+
+  ScamStory get thisWeeksScam => scamForWeek(now);
+  List<ScamStory> get scamHistory => scamArchive(now);
+
+  /// Opens the share sheet; he picks the friends.
+  Future<void> shareScam(ScamStory story) async {
+    final ok = await sharer.shareText(story.shareText(displayName));
+    if (ok) {
+      scamShared = {...scamShared, story.id};
+      await store.saveScamShared(scamShared);
+      notifyListeners();
+    }
+  }
+
+  WeeklyReview get review => weeklyReview(
+    now: now,
+    stories: stories,
+    calls: callEvents,
+    walkthroughsDone: completedWalkthroughs,
+    realWorldDone: realWorldDone,
+    questions: questions,
+    sleep: sleepEntries,
+    plan: planItems,
+  );
+
+  // ---------------------------------------------------------------- family phone
+
+  SharingSettings familySharing = const SharingSettings();
+  List<HealthEntry> familyHealth = [];
+  List<SleepEntry> familySleep = [];
+  List<PlanItem> familyPlan = [];
+  List<FamilyQuestion> familyQuestions = [];
+
+  Future<void> loadFamilyExtras() async {
+    if (!sync.connected || role != DeviceRole.family) return;
+    try {
+      familySharing = await sync.fetchSharing();
+      familyQuestions = await sync.fetchQuestions();
+      familyHealth = familySharing.health ? await sync.fetchHealth() : [];
+      familySleep = familySharing.sleep ? await sync.fetchSleep() : [];
+      familyPlan = familySharing.plan ? await sync.fetchPlan() : [];
+      syncError = null;
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  Future<bool> askFamilyQuestion({String? text, String? audioPath}) async {
+    try {
+      await sync.askQuestion(
+        id: _uuid.v4(),
+        text: text,
+        localAudioPath: audioPath,
+        authorName: displayName,
+      );
+      await loadFamilyExtras();
+      return true;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> sendPlanRequest(String text) async {
+    try {
+      await sync.sendPlanRequest(
+        day: todayKey,
+        text: text.trim(),
+        authorName: displayName,
+      );
       return true;
     } catch (e) {
       syncError = '$e';

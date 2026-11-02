@@ -5,6 +5,7 @@ import '../app_state.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'health_screen.dart';
 
 const sleepLabels = {
   SleepRating.good: 'நன்றாகத் தூங்கினேன்',
@@ -150,12 +151,20 @@ class RoutineScreen extends StatelessWidget {
         'காலை ${r.morningCheckIn.label} மணிக்கு தூக்கம் பற்றி ஒரு கேள்வி.';
 
     return AppScreen(
-      title: 'தூக்கமும் மாத்திரையும்',
+      title: 'உடல்நலம்',
       speakText: speak,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SleepCheckInCard(),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const HealthLogScreen())),
+            icon: const Icon(Icons.monitor_heart, size: 30),
+            label: const Text('BP, சர்க்கரை'),
+          ),
           const SizedBox(height: 24),
           Text('கடந்த ஏழு நாள் தூக்கம்', style: t.titleLarge),
           const SizedBox(height: 12),
