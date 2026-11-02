@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
@@ -5,9 +7,13 @@ import 'data/local_store.dart';
 import 'data/scam_stories.dart';
 import 'data/story_prompts.dart';
 import 'logic/daily_picker.dart';
+import 'logic/archive_export.dart';
+import 'logic/companion.dart';
 import 'logic/phase2.dart';
+import 'logic/phase3.dart';
 import 'models/models.dart';
 import 'services/audio.dart';
+import 'services/companion_model.dart';
 import 'services/dictation.dart';
 import 'services/phone.dart';
 import 'services/reminders.dart';
@@ -26,10 +32,16 @@ class AppState extends ChangeNotifier {
     required this.sync,
     required this.dictation,
     required this.sharer,
+    CompanionModel? companionModel,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now {
+  }) : _clock = clock ?? DateTime.now,
+       _fixedModel = companionModel {
     _load();
   }
+
+  /// Set in tests; otherwise built from the key saved in settings.
+  final CompanionModel? _fixedModel;
+  late CompanionModel companionModel;
 
   final LocalStore store;
   final Speaker speaker;
@@ -58,6 +70,13 @@ class AppState extends ChangeNotifier {
   late SharingSettings sharing;
   late Set<String> realWorldDone;
   late Set<String> scamShared;
+  late List<StoryFollowUp> followUps;
+  late List<MemoryFact> memory;
+  late List<CompanionSessionLog> sessions;
+  late CompanionSettings companionSettings;
+  late List<PatternAlert> alerts;
+  late AlertPermissions alertPermissions;
+  DateTime? firstUse;
 
   /// Last sync problem, shown quietly in settings, never to Appa.
   String? syncError;
@@ -79,6 +98,25 @@ class AppState extends ChangeNotifier {
     sharing = store.sharing;
     realWorldDone = store.realWorldDone;
     scamShared = store.scamShared;
+    followUps = store.followUps;
+    memory = store.memory;
+    sessions = store.sessions;
+    companionSettings = store.companionSettings;
+    alerts = store.alerts;
+    alertPermissions = store.alertPermissions;
+    firstUse = store.firstUse;
+    _buildModel();
+  }
+
+  void _buildModel() {
+    companionModel =
+        _fixedModel ??
+        (store.geminiKey.isEmpty
+            ? NoCompanionModel()
+            : GeminiCompanionModel(
+                apiKey: store.geminiKey,
+                model: store.geminiModel,
+              ));
   }
 
   // ---------------------------------------------------------------- setup
@@ -93,6 +131,10 @@ class AppState extends ChangeNotifier {
     displayName = name.trim();
     await store.setRole(role);
     await store.setDisplayName(displayName);
+    if (firstUse == null) {
+      firstUse = now;
+      await store.saveFirstUse(now);
+    }
     if (role == DeviceRole.appa) await reminders.schedule(reminderSettings);
     notifyListeners();
   }
@@ -101,6 +143,10 @@ class AppState extends ChangeNotifier {
 
   /// Today's question. Stable for the whole day, even after he answers it.
   StoryPrompt get todaysPrompt {
+    final assigned = followUps
+        .where((f) => f.usedOnDay == dayKey(now))
+        .firstOrNull;
+    if (assigned != null) return followUpPrompt(assigned);
     final today = dayKey(now);
     final answeredBefore = stories
         .where((s) => dayKey(s.createdAt) != today)
@@ -193,7 +239,7 @@ class AppState extends ChangeNotifier {
 
   // ---------------------------------------------------------------- calls
 
-  Contact? get todaysContact => contactForDay(now, contacts, callEvents);
+  Contact? get todaysContact => tunedContactForDay(now, contacts, callEvents);
   CallEvent? get todaysCall => todaysCallEvent(now, callEvents);
 
   Contact? contactById(String id) {
@@ -313,6 +359,7 @@ class AppState extends ChangeNotifier {
       if (role == DeviceRole.appa) {
         await pullReplies();
         await pullPhase2();
+        await pullPhase3();
       } else {
         await loadFamilyExtras();
       }
@@ -771,6 +818,7 @@ class AppState extends ChangeNotifier {
     if (!sync.connected || role != DeviceRole.family) return;
     try {
       familySharing = await sync.fetchSharing();
+      familyAlerts = await sync.fetchAlerts();
       familyQuestions = await sync.fetchQuestions();
       familyHealth = familySharing.health ? await sync.fetchHealth() : [];
       familySleep = familySharing.sleep ? await sync.fetchSleep() : [];
@@ -803,6 +851,377 @@ class AppState extends ChangeNotifier {
     try {
       await sync.sendPlanRequest(
         day: todayKey,
+        text: text.trim(),
+        authorName: displayName,
+      );
+      return true;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // ================================================================ Phase 3
+
+  // ---------------------------------------------------------------- calls
+
+  /// The call he made today and hasn't rated ("Good call?"), if any.
+  CallEvent? get unratedCall => unratedCallToday(now, callEvents);
+
+  /// One tap after a call. Tunes who is suggested next.
+  Future<void> rateCall(CallRating r) async {
+    final target = unratedCall;
+    if (target == null) return;
+    callEvents = [
+      for (final e in callEvents) identical(e, target) ? e.withRating(r) : e,
+    ];
+    await store.saveCallEvents(callEvents);
+    notifyListeners();
+  }
+
+  /// Birthdays and festivals today and tomorrow.
+  List<Occasion> get occasions => upcomingOccasions(now, contacts);
+
+  // ---------------------------------------------------------------- story archive
+
+  StoryPrompt followUpPrompt(StoryFollowUp f) => StoryPrompt(
+    'followup:${f.storyId}:${f.id}',
+    '${f.authorName} கேட்கிறார்கள்: ${f.text}',
+    '',
+  );
+
+  /// Turns the oldest waiting follow-up into today's question, once a day,
+  /// and only if he hasn't already answered today's question.
+  Future<void> ensureTodaysFollowUp() async {
+    if (answeredToday) return;
+    final r = followUpForDay(todayKey, followUps);
+    if (!r.assign || r.followUp == null) return;
+    final used = r.followUp!.usedOn(todayKey);
+    followUps = [for (final f in followUps) f.id == used.id ? used : f];
+    await store.saveFollowUps(followUps);
+    notifyListeners();
+    if (sync.connected && role == DeviceRole.appa && used.storyId.isNotEmpty) {
+      try {
+        await sync.markFollowUpUsed(used.id, todayKey);
+      } catch (e) {
+        syncError = '$e';
+      }
+    }
+  }
+
+  /// A follow-up asked on this phone (family on a visit, or the companion's
+  /// "put that in tomorrow's story"). Becomes a later day's question.
+  Future<void> addFollowUp({
+    required String storyId,
+    required String text,
+    required String author,
+  }) async {
+    if (text.trim().isEmpty) return;
+    followUps = [
+      ...followUps,
+      StoryFollowUp(
+        id: _uuid.v4(),
+        storyId: storyId,
+        text: text.trim(),
+        authorName: author.trim(),
+        createdAt: now,
+      ),
+    ];
+    await store.saveFollowUps(followUps);
+    notifyListeners();
+  }
+
+  int get waitingFollowUps =>
+      followUps.where((f) => f.usedOnDay == null).length;
+
+  StoryTheme themeOf(Story s) {
+    if (!s.promptId.startsWith('followup:')) return themeOfPrompt(s.promptId);
+    final parentId = s.promptId.split(':')[1];
+    final parent = stories.where((x) => x.id == parentId).firstOrNull;
+    return parent == null ? StoryTheme.life : themeOf(parent);
+  }
+
+  Map<StoryTheme, List<Story>> get storiesByTheme {
+    final out = {for (final t in StoryTheme.values) t: <Story>[]};
+    for (final st in stories) {
+      out[themeOf(st)]!.add(st);
+    }
+    return out;
+  }
+
+  /// Appa's phone: bring in family follow-ups.
+  Future<void> pullPhase3() async {
+    if (!sync.connected || role != DeviceRole.appa) return;
+    try {
+      final remote = await sync.fetchFollowUps();
+      final known = {for (final f in followUps) f.id};
+      final added = remote.where((r) => !known.contains(r.id)).toList();
+      if (added.isNotEmpty) {
+        followUps = [...followUps, ...added];
+        await store.saveFollowUps(followUps);
+      }
+      await ensureTodaysFollowUp();
+      syncError = null;
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  bool transcribing = false;
+
+  /// Writes out a story's text (sent to the model for transcription only).
+  Future<bool> transcribeStory(String id) async {
+    final st = stories.where((x) => x.id == id).firstOrNull;
+    if (st == null || st.localAudioPath == null || !companionModel.configured) {
+      return false;
+    }
+    String? text;
+    try {
+      text = await companionModel.transcribe(st.localAudioPath!);
+    } catch (e) {
+      syncError = '$e';
+    }
+    if (text == null || text.isEmpty) return false;
+    stories = [
+      for (final x in stories) x.id == id ? x.copyWith(transcript: text) : x,
+    ];
+    await store.saveStories(stories);
+    notifyListeners();
+    if (sync.connected && role == DeviceRole.appa && st.synced) {
+      try {
+        await sync.setTranscript(id, text);
+      } catch (e) {
+        syncError = '$e';
+      }
+    }
+    return true;
+  }
+
+  Future<int> transcribeAll() async {
+    transcribing = true;
+    notifyListeners();
+    var n = 0;
+    for (final st in stories.where((x) => x.transcript == null).toList()) {
+      if (await transcribeStory(st.id)) n++;
+    }
+    transcribing = false;
+    notifyListeners();
+    return n;
+  }
+
+  /// Zips every story's audio plus one transcript file and opens the share
+  /// sheet, so he can give the archive to his grandchildren.
+  Future<bool> exportArchive() async {
+    final themed = [
+      for (final t in StoryTheme.values)
+        for (final st in storiesByTheme[t]!.reversed) (theme: t, story: st),
+    ];
+    final bytes = buildArchiveZip(
+      appaName: displayName,
+      items: themed,
+      readAudio: (p) => File(p).readAsBytesSync(),
+    );
+    final path = await audio.filePath('appa-kathaigal.zip');
+    await File(path).writeAsBytes(bytes, flush: true);
+    return sharer.shareFiles([path], '$displayName அவர்களின் கதைகள்');
+  }
+
+  // ---------------------------------------------------------------- companion
+
+  bool get companionAvailable =>
+      role == DeviceRole.appa &&
+      companionSettings.enabled &&
+      companionModel.configured;
+
+  String get familyPerson => alertPermissions.recipient;
+
+  CompanionConversation startCompanion() => CompanionConversation(
+    model: companionModel,
+    context: CompanionContext(
+      appaName: displayName,
+      contacts: contacts,
+      memory: memory,
+      todaysPlan: planForDay(todayKey).map((p) => p.text).toList(),
+      settings: companionSettings,
+      familyPerson: familyPerson,
+    ),
+    start: now,
+  );
+
+  /// He tapped the suggestion's button.
+  Future<void> takeSuggestion(CompanionConversation c, Suggestion sug) async {
+    c.took(sug.type);
+    switch (sug.type) {
+      case SuggestionType.call:
+        if (sug.contact != null) await callContact(sug.contact!);
+      case SuggestionType.story:
+        await addFollowUp(
+          storyId: '',
+          text:
+              'இன்று பேசியதை குடும்பத்துக்கு விரிவாகச் சொல்லுங்கள்: ${sug.text ?? ''}',
+          author: 'நீங்கள்',
+        );
+      case SuggestionType.plan:
+        await addPlanItem(sug.text ?? '');
+      case SuggestionType.none:
+        break;
+    }
+  }
+
+  /// Saves the numbers (no transcript) and anything he let it remember.
+  Future<void> endCompanion(CompanionConversation c) async {
+    final log = c.finish(now);
+    sessions = [...sessions, log];
+    await store.saveSessions(sessions);
+    if (companionSettings.remember && c.remembered.isNotEmpty) {
+      final have = memory.map((m) => m.text).toSet();
+      memory = [
+        ...memory,
+        for (final t in c.remembered.toSet())
+          if (!have.contains(t))
+            MemoryFact(id: _uuid.v4(), text: t, createdAt: now),
+      ];
+      await store.saveMemory(memory);
+    }
+    notifyListeners();
+    await checkPatterns();
+  }
+
+  Future<void> deleteMemory(String id) async {
+    memory = memory.where((m) => m.id != id).toList();
+    await store.saveMemory(memory);
+    notifyListeners();
+  }
+
+  Future<void> clearMemory() async {
+    memory = [];
+    await store.saveMemory(memory);
+    notifyListeners();
+  }
+
+  /// [byAppa] is true when he changed it on his own companion screen.
+  Future<void> updateCompanionSettings(
+    CompanionSettings c, {
+    bool byAppa = true,
+  }) async {
+    companionSettings = c.copyWith(
+      changedByAppa: companionSettings.changedByAppa || byAppa,
+    );
+    await store.saveCompanionSettings(companionSettings);
+    if (!companionSettings.remember) await clearMemory();
+    notifyListeners();
+  }
+
+  Future<void> saveGemini({required String key, required String model}) async {
+    await store.saveGemini(key: key, model: model);
+    _buildModel();
+    notifyListeners();
+  }
+
+  CompanionStats get companionReview => companionStats(now, sessions);
+
+  // ---------------------------------------------------------------- patterns
+
+  PatternAlert? get pendingAlert =>
+      alerts.where((a) => a.decision == AlertDecision.pending).firstOrNull;
+
+  /// Looks for patterns. With a standing permission he set (and sync on),
+  /// the note goes straight away and he is told; otherwise he is asked.
+  Future<void> checkPatterns() async {
+    if (role != DeviceRole.appa) return;
+    final found = detectPatterns(
+      now: now,
+      sleep: sleepEntries,
+      calls: callEvents,
+      contacts: contacts,
+      sessions: sessions,
+      alerts: alerts,
+      firstUse: firstUse,
+    );
+    if (found.isEmpty) return;
+    for (final k in found) {
+      var a = PatternAlert(
+        id: _uuid.v4(),
+        kind: k,
+        noticedOn: todayKey,
+        decision: AlertDecision.pending,
+      );
+      if (alertPermissions.always.contains(k) && sync.connected) {
+        if (await _sendAlert(a)) a = a.decide(AlertDecision.told, now);
+      }
+      alerts = [...alerts, a];
+    }
+    await store.saveAlerts(alerts);
+    notifyListeners();
+  }
+
+  Future<bool> _sendAlert(PatternAlert a) async {
+    final note = alertNote(a.kind, displayName);
+    if (sync.connected) {
+      try {
+        await sync.sendAlert(id: a.id, kind: a.kind.name, note: note);
+        return true;
+      } catch (e) {
+        syncError = '$e';
+        return false;
+      }
+    }
+    // No sync: the share sheet opens and he picks his son himself.
+    return sharer.shareText(note);
+  }
+
+  Future<void> decideAlert(String id, {required bool tell}) async {
+    final a = alerts.where((x) => x.id == id).firstOrNull;
+    if (a == null) return;
+    var decided = a.decide(AlertDecision.notTold, now);
+    if (tell && await _sendAlert(a)) {
+      decided = a.decide(AlertDecision.told, now);
+    }
+    alerts = [for (final x in alerts) x.id == id ? decided : x];
+    await store.saveAlerts(alerts);
+    notifyListeners();
+  }
+
+  Future<void> updateAlertPermissions(AlertPermissions p) async {
+    alertPermissions = p;
+    await store.saveAlertPermissions(p);
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------- family phone (Phase 3)
+
+  List<FamilyAlert> familyAlerts = [];
+
+  Future<void> loadFamilyAlerts() async {
+    if (!sync.connected || role != DeviceRole.family) return;
+    try {
+      familyAlerts = await sync.fetchAlerts();
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  Future<void> ackFamilyAlert(String id) async {
+    try {
+      await sync.ackAlert(id);
+      familyAlerts = familyAlerts.where((a) => a.id != id).toList();
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  Future<bool> askFollowUp({
+    required String storyId,
+    required String text,
+  }) async {
+    try {
+      await sync.addFollowUp(
+        id: _uuid.v4(),
+        storyId: storyId,
         text: text.trim(),
         authorName: displayName,
       );

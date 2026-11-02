@@ -274,7 +274,13 @@ void main() {
       );
       await tester.enterText(fields.at(0), 'கணேசன்');
       await tester.enterText(fields.at(1), '9840012345');
-      await tapText(tester, 'சேமி');
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('சேமி'),
+        ),
+      );
+      await tester.pumpAndSettle();
       expect(h.state.contacts.single.name, 'கணேசன்');
     });
   });

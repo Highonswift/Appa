@@ -5,6 +5,8 @@ import '../app_state.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../logic/phase3.dart';
+import 'companion_screen.dart';
 
 /// Roadmap: "Everything the family sees is listed on one screen he can read,
 /// and he can revoke any item." Written to him, in his words.
@@ -112,10 +114,51 @@ class SharingScreen extends StatelessWidget {
             value: sh.plan,
             onChanged: (v) => s.updateSharing(sh.copyWith(plan: v)),
           ),
+          const SizedBox(height: 16),
+          Text('எப்போது ${s.familyPerson}-இடம் சொல்லலாம்', style: t.titleLarge),
+          const SizedBox(height: 6),
+          Text(
+            'இவை நடந்தால், முதலில் உங்களிடம் கேட்பேன். "எப்போதும் சொல்லலாம்" என்று போட்டால், கேட்காமல் ஒரு சிறு செய்தி மட்டும் அனுப்பி உங்களிடம் சொல்வேன்.',
+            style: t.bodyMedium,
+          ),
+          const SizedBox(height: 8),
+          for (final k in PatternKind.values)
+            SwitchListTile(
+              value: s.alertPermissions.always.contains(k),
+              onChanged: (v) => s.updateAlertPermissions(
+                s.alertPermissions.copyWith(
+                  always: v
+                      ? {...s.alertPermissions.always, k}
+                      : ({...s.alertPermissions.always}..remove(k)),
+                ),
+              ),
+              title: Text(
+                patternNames[k]!,
+                style: const TextStyle(fontSize: 20),
+              ),
+              subtitle: Text(
+                s.alertPermissions.always.contains(k)
+                    ? 'எப்போதும் சொல்லலாம்'
+                    : 'முதலில் என்னிடம் கேள்',
+              ),
+            ),
+          if (s.companionModel.configured) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const MemoryScreen())),
+              icon: const Icon(Icons.psychology_alt, size: 28),
+              label: Text(
+                'பேசும் வசதி நினைவில் வைத்திருப்பவை (${s.memory.length})',
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
           item(
             icon: Icons.lock,
             title: 'எப்போதும் உங்களுக்கு மட்டும்',
-            detail: 'யாரை அழைத்தீர்கள், பயிற்சிகள், மாத்திரை நேரம். இவை ஒருபோதும் பகிரப்படாது.',
+            detail: 'யாரை அழைத்தீர்கள், பயிற்சிகள், மாத்திரை நேரம், பேசும் வசதியில் பேசியவை. இவை ஒருபோதும் பகிரப்படாது.',
             value: false,
           ),
         ],
@@ -168,6 +211,34 @@ class ReviewScreen extends StatelessWidget {
             'குடும்பக் கேள்விகள் (பதில் / காத்திருப்பவை)',
             '${r.questionsAnswered} / ${r.questionsWaiting}',
           ),
+          row('கதைத் தொகுப்பு (இலக்கு 40)', '${s.stories.length}'),
+          if (s.companionModel.configured) ...[
+            row(
+              'பேசும் வசதி: இந்த வாரம்',
+              '${s.companionReview.sessionsThisWeek} முறை',
+            ),
+            row(
+              'சராசரி நேரம் (இந்த / கடந்த வாரம்)',
+              '${s.companionReview.avgMinutesThisWeek.toStringAsFixed(1)} / ${s.companionReview.avgMinutesLastWeek.toStringAsFixed(1)} நிமி',
+            ),
+            row(
+              'ஒருவரிடம் பேச / கதை / திட்டத்தில் முடிந்தவை',
+              '${(s.companionReview.outwardShare * 100).round()}%',
+            ),
+            row(
+              'அவரே அமைப்பை மாற்றினாரா',
+              s.companionSettings.changedByAppa ? 'ஆம்' : 'இல்லை',
+            ),
+            if (s.companionReview.lengthening)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: NoteBox(
+                  icon: Icons.warning_amber,
+                  color: AppColors.accent,
+                  text: 'பேசும் நேரம் வாரத்துக்கு வாரம் கூடுகிறது. இது நிறுத்தி யோசிக்க வேண்டிய அறிகுறி: நேர அளவைக் குறைக்கலாம்.',
+                ),
+              ),
+          ],
           const SizedBox(height: 16),
           Text('தூக்கம், கடந்த 4 வாரம்', style: t.titleLarge),
           const SizedBox(height: 8),

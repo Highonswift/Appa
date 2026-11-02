@@ -7,6 +7,18 @@ String dayKey(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 /// A person Appa might call. Added by family in settings, by name.
+/// Who a contact is to Appa (Phase 3: the list grows beyond family).
+enum ContactGroup { family, relative, colleague, friend, neighbour }
+
+const contactGroupNames = {
+  ContactGroup.family: 'குடும்பம்',
+  ContactGroup.relative: 'உறவினர்',
+  ContactGroup.colleague: 'டிப்போ / வேலை நண்பர்',
+  ContactGroup.friend: 'நண்பர்',
+  ContactGroup.neighbour: 'அக்கம்பக்கம்',
+};
+
+/// A person Appa might call. Added by family in settings, by name.
 class Contact {
   Contact({
     required this.id,
@@ -14,6 +26,9 @@ class Contact {
     required this.phone,
     this.relation = '',
     this.lastCalled,
+    this.group = ContactGroup.friend,
+    this.birthdayMonth,
+    this.birthdayDay,
   });
 
   final String id;
@@ -21,18 +36,32 @@ class Contact {
   final String phone;
   final String relation;
   final DateTime? lastCalled;
+  final ContactGroup group;
+
+  /// Birthday without a year (so nobody has to know it); both or neither.
+  final int? birthdayMonth;
+  final int? birthdayDay;
+
+  bool get hasBirthday => birthdayMonth != null && birthdayDay != null;
 
   Contact copyWith({
     String? name,
     String? phone,
     String? relation,
     DateTime? lastCalled,
+    ContactGroup? group,
+    int? birthdayMonth,
+    int? birthdayDay,
+    bool clearBirthday = false,
   }) => Contact(
     id: id,
     name: name ?? this.name,
     phone: phone ?? this.phone,
     relation: relation ?? this.relation,
     lastCalled: lastCalled ?? this.lastCalled,
+    group: group ?? this.group,
+    birthdayMonth: clearBirthday ? null : birthdayMonth ?? this.birthdayMonth,
+    birthdayDay: clearBirthday ? null : birthdayDay ?? this.birthdayDay,
   );
 
   Map<String, dynamic> toJson() => {
@@ -41,6 +70,9 @@ class Contact {
     'phone': phone,
     'relation': relation,
     'lastCalled': lastCalled?.toIso8601String(),
+    'group': group.name,
+    'birthdayMonth': birthdayMonth,
+    'birthdayDay': birthdayDay,
   };
 
   factory Contact.fromJson(Map<String, dynamic> j) => Contact(
@@ -51,6 +83,9 @@ class Contact {
     lastCalled: j['lastCalled'] == null
         ? null
         : DateTime.parse(j['lastCalled'] as String),
+    group: ContactGroup.values.asNameMap()[j['group']] ?? ContactGroup.friend,
+    birthdayMonth: j['birthdayMonth'] as int?,
+    birthdayDay: j['birthdayDay'] as int?,
   );
 }
 
@@ -105,6 +140,7 @@ class StoryReply {
 }
 
 /// One recorded answer to the story-of-the-day question.
+/// One recorded answer to the story-of-the-day question.
 class Story {
   Story({
     required this.id,
@@ -114,6 +150,7 @@ class Story {
     this.localAudioPath,
     this.remoteAudioPath,
     this.replies = const [],
+    this.transcript,
   });
 
   final String id;
@@ -124,6 +161,9 @@ class Story {
   final String? remoteAudioPath;
   final List<StoryReply> replies;
 
+  /// Written-out text of the recording (Phase 3 archive export).
+  final String? transcript;
+
   bool get synced => remoteAudioPath != null;
   int get unheardReplies => replies.where((r) => !r.listened).length;
 
@@ -131,6 +171,7 @@ class Story {
     String? remoteAudioPath,
     String? localAudioPath,
     List<StoryReply>? replies,
+    String? transcript,
   }) => Story(
     id: id,
     promptId: promptId,
@@ -139,6 +180,7 @@ class Story {
     localAudioPath: localAudioPath ?? this.localAudioPath,
     remoteAudioPath: remoteAudioPath ?? this.remoteAudioPath,
     replies: replies ?? this.replies,
+    transcript: transcript ?? this.transcript,
   );
 
   Map<String, dynamic> toJson() => {
@@ -149,6 +191,7 @@ class Story {
     'localAudioPath': localAudioPath,
     'remoteAudioPath': remoteAudioPath,
     'replies': replies.map((r) => r.toJson()).toList(),
+    'transcript': transcript,
   };
 
   factory Story.fromJson(Map<String, dynamic> j) => Story(
@@ -161,6 +204,7 @@ class Story {
     replies: ((j['replies'] as List?) ?? [])
         .map((e) => StoryReply.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList(),
+    transcript: j['transcript'] as String?,
   );
 }
 
@@ -194,24 +238,39 @@ class SleepEntry {
 /// What happened with the daily call nudge.
 enum CallOutcome { called, notToday }
 
+/// His one-tap answer after a call ("Good call?"), used to tune who is
+/// suggested next. Null when he skipped the question.
+enum CallRating { good, okay, notGood }
+
 class CallEvent {
   CallEvent({
     required this.day,
     required this.contactId,
     required this.outcome,
     required this.at,
+    this.rating,
   });
 
   final String day;
   final String contactId;
   final CallOutcome outcome;
   final DateTime at;
+  final CallRating? rating;
+
+  CallEvent withRating(CallRating r) => CallEvent(
+    day: day,
+    contactId: contactId,
+    outcome: outcome,
+    at: at,
+    rating: r,
+  );
 
   Map<String, dynamic> toJson() => {
     'day': day,
     'contactId': contactId,
     'outcome': outcome.name,
     'at': at.toIso8601String(),
+    'rating': rating?.name,
   };
 
   factory CallEvent.fromJson(Map<String, dynamic> j) => CallEvent(
@@ -219,6 +278,7 @@ class CallEvent {
     contactId: j['contactId'] as String,
     outcome: CallOutcome.values.byName(j['outcome'] as String),
     at: DateTime.parse(j['at'] as String),
+    rating: CallRating.values.asNameMap()[j['rating']],
   );
 }
 
@@ -502,5 +562,254 @@ class FamilyQuestion {
     answeredAt: j['answeredAt'] == null
         ? null
         : DateTime.parse(j['answeredAt'] as String),
+  );
+}
+
+// ============================================================== Phase 3
+
+/// A follow-up question from family about one of his stories. It becomes a
+/// later day's story question (roadmap: "Family can ask follow-up questions,
+/// which generate the next day's prompt").
+class StoryFollowUp {
+  StoryFollowUp({
+    required this.id,
+    required this.storyId,
+    required this.text,
+    required this.authorName,
+    required this.createdAt,
+    this.usedOnDay,
+  });
+
+  final String id;
+  final String storyId;
+  final String text;
+  final String authorName;
+  final DateTime createdAt;
+
+  /// dayKey of the day it was asked as the story question.
+  final String? usedOnDay;
+
+  StoryFollowUp usedOn(String day) => StoryFollowUp(
+    id: id,
+    storyId: storyId,
+    text: text,
+    authorName: authorName,
+    createdAt: createdAt,
+    usedOnDay: day,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'storyId': storyId,
+    'text': text,
+    'authorName': authorName,
+    'createdAt': createdAt.toIso8601String(),
+    'usedOnDay': usedOnDay,
+  };
+
+  factory StoryFollowUp.fromJson(Map<String, dynamic> j) => StoryFollowUp(
+    id: j['id'] as String,
+    storyId: j['storyId'] as String? ?? '',
+    text: j['text'] as String? ?? '',
+    authorName: j['authorName'] as String? ?? '',
+    createdAt: DateTime.parse(j['createdAt'] as String),
+    usedOnDay: j['usedOnDay'] as String?,
+  );
+}
+
+/// Something he told the companion that it may remember. Shown to him on
+/// "நீங்கள் சொன்னவை" and deletable one by one or all at once.
+class MemoryFact {
+  MemoryFact({required this.id, required this.text, required this.createdAt});
+  final String id;
+  final String text;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'text': text,
+    'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory MemoryFact.fromJson(Map<String, dynamic> j) => MemoryFact(
+    id: j['id'] as String,
+    text: j['text'] as String? ?? '',
+    createdAt: DateTime.parse(j['createdAt'] as String),
+  );
+}
+
+/// Feelings the companion noticed in a session. Only these labels are kept,
+/// never what he said.
+enum Feeling { unwanted, angry, lonely, sad }
+
+/// What a companion session ended in.
+enum OutwardAction { none, call, story, plan }
+
+/// One companion conversation, as numbers only. No transcript is stored.
+class CompanionSessionLog {
+  CompanionSessionLog({
+    required this.start,
+    required this.end,
+    required this.exchanges,
+    required this.outward,
+    this.feelings = const {},
+  });
+
+  final DateTime start;
+  final DateTime end;
+  final int exchanges;
+  final OutwardAction outward;
+  final Set<Feeling> feelings;
+
+  Duration get length => end.difference(start);
+
+  Map<String, dynamic> toJson() => {
+    'start': start.toIso8601String(),
+    'end': end.toIso8601String(),
+    'exchanges': exchanges,
+    'outward': outward.name,
+    'feelings': feelings.map((f) => f.name).toList(),
+  };
+
+  factory CompanionSessionLog.fromJson(Map<String, dynamic> j) =>
+      CompanionSessionLog(
+        start: DateTime.parse(j['start'] as String),
+        end: DateTime.parse(j['end'] as String),
+        exchanges: j['exchanges'] as int? ?? 0,
+        outward:
+            OutwardAction.values.asNameMap()[j['outward']] ??
+            OutwardAction.none,
+        feelings: {
+          for (final f in (j['feelings'] as List? ?? []))
+            if (Feeling.values.asNameMap()[f] != null)
+              Feeling.values.asNameMap()[f]!,
+        },
+      );
+}
+
+/// His companion settings. He can change every one of these himself (exit
+/// criterion: "he has turned off or adjusted at least one companion setting
+/// himself").
+class CompanionSettings {
+  const CompanionSettings({
+    this.enabled = true,
+    this.minutes = 15,
+    this.remember = true,
+    this.changedByAppa = false,
+  });
+
+  final bool enabled;
+
+  /// Soft session limit: 5, 10 or 15 (roadmap: about 15; shrink it if
+  /// sessions lengthen).
+  final int minutes;
+  final bool remember;
+
+  /// Set the first time he changes anything here himself.
+  final bool changedByAppa;
+
+  CompanionSettings copyWith({
+    bool? enabled,
+    int? minutes,
+    bool? remember,
+    bool? changedByAppa,
+  }) => CompanionSettings(
+    enabled: enabled ?? this.enabled,
+    minutes: minutes ?? this.minutes,
+    remember: remember ?? this.remember,
+    changedByAppa: changedByAppa ?? this.changedByAppa,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'enabled': enabled,
+    'minutes': minutes,
+    'remember': remember,
+    'changedByAppa': changedByAppa,
+  };
+
+  factory CompanionSettings.fromJson(Map<String, dynamic> j) =>
+      CompanionSettings(
+        enabled: j['enabled'] as bool? ?? true,
+        minutes: j['minutes'] as int? ?? 15,
+        remember: j['remember'] as bool? ?? true,
+        changedByAppa: j['changedByAppa'] as bool? ?? false,
+      );
+}
+
+/// The patterns the app watches for (roadmap Phase 3 "Pattern surfacing").
+enum PatternKind { badSleep, lowMood, noCalls }
+
+/// A pattern noticed and what Appa decided about telling the family.
+enum AlertDecision { pending, told, notTold }
+
+class PatternAlert {
+  PatternAlert({
+    required this.id,
+    required this.kind,
+    required this.noticedOn,
+    required this.decision,
+    this.decidedAt,
+  });
+
+  final String id;
+  final PatternKind kind;
+  final String noticedOn; // dayKey
+  final AlertDecision decision;
+  final DateTime? decidedAt;
+
+  PatternAlert decide(AlertDecision d, DateTime at) => PatternAlert(
+    id: id,
+    kind: kind,
+    noticedOn: noticedOn,
+    decision: d,
+    decidedAt: at,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'kind': kind.name,
+    'noticedOn': noticedOn,
+    'decision': decision.name,
+    'decidedAt': decidedAt?.toIso8601String(),
+  };
+
+  factory PatternAlert.fromJson(Map<String, dynamic> j) => PatternAlert(
+    id: j['id'] as String,
+    kind: PatternKind.values.byName(j['kind'] as String),
+    noticedOn: j['noticedOn'] as String,
+    decision: AlertDecision.values.byName(j['decision'] as String),
+    decidedAt: j['decidedAt'] == null
+        ? null
+        : DateTime.parse(j['decidedAt'] as String),
+  );
+}
+
+/// Standing permissions he set himself: "you may always tell my son about
+/// this". Off by default.
+class AlertPermissions {
+  const AlertPermissions({this.always = const {}, this.recipient = 'ராகுல்'});
+  final Set<PatternKind> always;
+
+  /// Who receives the short note.
+  final String recipient;
+
+  AlertPermissions copyWith({Set<PatternKind>? always, String? recipient}) =>
+      AlertPermissions(
+        always: always ?? this.always,
+        recipient: recipient ?? this.recipient,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'always': always.map((k) => k.name).toList(),
+    'recipient': recipient,
+  };
+
+  factory AlertPermissions.fromJson(Map<String, dynamic> j) => AlertPermissions(
+    always: {
+      for (final k in (j['always'] as List? ?? []))
+        if (PatternKind.values.asNameMap()[k] != null)
+          PatternKind.values.asNameMap()[k]!,
+    },
+    recipient: j['recipient'] as String? ?? 'ராகுல்',
   );
 }

@@ -95,6 +95,10 @@ class SettingsScreen extends StatelessWidget {
           ],
           _Section('குடும்பத்துடன் பகிர்தல் (விருப்பம்)'),
           _SyncSetup(appa: appa),
+          if (appa) ...[
+            _Section('பேசும் வசதி (Gemini, இலவசம்)'),
+            const _GeminiSetup(),
+          ],
           _Section('இந்த போன்'),
           Text(
             '${appa ? 'அப்பாவின் போன்' : 'குடும்பத்தினர் போன்'} · ${s.displayName}',
@@ -110,70 +114,146 @@ class SettingsScreen extends StatelessWidget {
     final name = TextEditingController(text: existing?.name ?? '');
     final phone = TextEditingController(text: existing?.phone ?? '');
     final relation = TextEditingController(text: existing?.relation ?? '');
+    var group = existing?.group ?? ContactGroup.friend;
+    int? bMonth = existing?.birthdayMonth;
+    int? bDay = existing?.birthdayDay;
+    const months = [
+      'ஜன',
+      'பிப்',
+      'மார்',
+      'ஏப்',
+      'மே',
+      'ஜூன்',
+      'ஜூலை',
+      'ஆக',
+      'செப்',
+      'அக்',
+      'நவ',
+      'டிச',
+    ];
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existing == null ? 'ஒருவரைச் சேர்' : 'மாற்று'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: name,
-                decoration: const InputDecoration(labelText: 'பெயர்'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: phone,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-                ],
-                decoration: const InputDecoration(labelText: 'போன் எண்'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: relation,
-                decoration: const InputDecoration(
-                  labelText: 'உறவு (உதா: டிப்போ நண்பர்)',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text(existing == null ? 'ஒருவரைச் சேர்' : 'மாற்று'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: name,
+                  decoration: const InputDecoration(labelText: 'பெயர்'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phone,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+                  ],
+                  decoration: const InputDecoration(labelText: 'போன் எண்'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: relation,
+                  decoration: const InputDecoration(
+                    labelText: 'உறவு (உதா: டிப்போ நண்பர்)',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<ContactGroup>(
+                  isExpanded: true,
+                  initialValue: group,
+                  decoration: const InputDecoration(labelText: 'யார்'),
+                  items: [
+                    for (final g in ContactGroup.values)
+                      DropdownMenuItem(
+                        value: g,
+                        child: Text(contactGroupNames[g]!),
+                      ),
+                  ],
+                  onChanged: (g) => setD(() => group = g ?? group),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        isExpanded: true,
+                        initialValue: bDay,
+                        decoration: const InputDecoration(
+                          labelText: 'பிறந்த தேதி',
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('—')),
+                          for (var d = 1; d <= 31; d++)
+                            DropdownMenuItem(value: d, child: Text('$d')),
+                        ],
+                        onChanged: (v) => setD(() => bDay = v),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        isExpanded: true,
+                        initialValue: bMonth,
+                        decoration: const InputDecoration(labelText: 'மாதம்'),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('—')),
+                          for (var m = 1; m <= 12; m++)
+                            DropdownMenuItem(
+                              value: m,
+                              child: Text(months[m - 1]),
+                            ),
+                        ],
+                        onChanged: (v) => setD(() => bMonth = v),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            if (existing != null)
+              TextButton(
+                onPressed: () {
+                  s.removeContact(existing.id);
+                  Navigator.pop(ctx);
+                },
+                child: const Text(
+                  'நீக்கு',
+                  style: TextStyle(color: AppColors.accent),
                 ),
               ),
-            ],
-          ),
-        ),
-        actions: [
-          if (existing != null)
             TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('ரத்து'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
               onPressed: () {
-                s.removeContact(existing.id);
+                if (name.text.trim().isEmpty || phone.text.trim().isEmpty) {
+                  return;
+                }
+                s.saveContact(
+                  (existing ?? Contact(id: s.newId(), name: '', phone: ''))
+                      .copyWith(
+                        name: name.text.trim(),
+                        phone: phone.text.trim(),
+                        relation: relation.text.trim(),
+                        group: group,
+                        birthdayMonth: bMonth,
+                        birthdayDay: bDay,
+                        clearBirthday: bMonth == null || bDay == null,
+                      ),
+                );
                 Navigator.pop(ctx);
               },
-              child: const Text(
-                'நீக்கு',
-                style: TextStyle(color: AppColors.accent),
-              ),
+              child: const Text('சேமி'),
             ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('ரத்து'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(120, 56)),
-            onPressed: () {
-              if (name.text.trim().isEmpty || phone.text.trim().isEmpty) return;
-              s.saveContact(
-                (existing ?? Contact(id: s.newId(), name: '', phone: ''))
-                    .copyWith(
-                      name: name.text.trim(),
-                      phone: phone.text.trim(),
-                      relation: relation.text.trim(),
-                    ),
-              );
-              Navigator.pop(ctx);
-            },
-            child: const Text('சேமி'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -406,6 +486,75 @@ class _SyncSetupState extends State<_SyncSetup> {
             style: t.bodyMedium?.copyWith(color: AppColors.accent),
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Gemini free-tier key for the companion and story transcripts.
+class _GeminiSetup extends StatefulWidget {
+  const _GeminiSetup();
+  @override
+  State<_GeminiSetup> createState() => _GeminiSetupState();
+}
+
+class _GeminiSetupState extends State<_GeminiSetup> {
+  late final key = TextEditingController(
+    text: context.read<AppState>().store.geminiKey,
+  );
+  late final model = TextEditingController(
+    text: context.read<AppState>().store.geminiModel,
+  );
+  String? note;
+
+  @override
+  void dispose() {
+    key.dispose();
+    model.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final s = context.watch<AppState>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'aistudio.google.com/apikey-இல் இலவச key எடுத்துப் போடுங்கள். கவனிக்க: இலவச நிலையில் Google இந்த உரையாடல்களைத் தன் சேவையை மேம்படுத்தப் பயன்படுத்தலாம். பணம் கட்டும் நிலைக்கு மாற்றினால் அது நிற்கும்.',
+          style: t.bodyMedium?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: key,
+          obscureText: true,
+          decoration: const InputDecoration(labelText: 'Gemini API key'),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: model,
+          decoration: const InputDecoration(
+            labelText: 'Model (இயல்பு: gemini-2.5-flash)',
+          ),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton(
+          onPressed: () async {
+            await s.saveGemini(key: key.text, model: model.text);
+            setState(
+              () => note = s.companionModel.configured
+                  ? 'சேமிக்கப்பட்டது.'
+                  : 'Key நீக்கப்பட்டது; பேசும் வசதி மறைக்கப்பட்டது.',
+            );
+          },
+          child: const Text('சேமி'),
+        ),
+        if (note != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(note!, style: t.bodyMedium),
+          ),
       ],
     );
   }

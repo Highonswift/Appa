@@ -34,6 +34,15 @@ class LocalStore {
   static const _kQuestions = 'familyQuestions';
   static const _kRealWorld = 'realWorldDone';
   static const _kScamShared = 'scamShared';
+  static const _kFollowUps = 'followUps';
+  static const _kMemory = 'companionMemory';
+  static const _kSessions = 'companionSessions';
+  static const _kCompanion = 'companionSettings';
+  static const _kAlerts = 'patternAlerts';
+  static const _kAlertPerms = 'alertPermissions';
+  static const _kGeminiKey = 'geminiKey';
+  static const _kGeminiModel = 'geminiModel';
+  static const _kFirstUse = 'firstUse';
 
   DeviceRole? get role {
     final r = _prefs.getString(_kRole);
@@ -169,4 +178,75 @@ class LocalStore {
       (_prefs.getStringList(_kScamShared) ?? []).toSet();
   Future<void> saveScamShared(Set<String> ids) =>
       _prefs.setStringList(_kScamShared, ids.toList());
+
+  // ------------------------------------------------------------ Phase 3
+
+  List<StoryFollowUp> get followUps =>
+      _list(_kFollowUps, StoryFollowUp.fromJson);
+  Future<void> saveFollowUps(List<StoryFollowUp> f) =>
+      _saveList(_kFollowUps, f.map((e) => e.toJson()).toList());
+
+  List<MemoryFact> get memory => _list(_kMemory, MemoryFact.fromJson);
+  Future<void> saveMemory(List<MemoryFact> m) =>
+      _saveList(_kMemory, m.map((e) => e.toJson()).toList());
+
+  List<CompanionSessionLog> get sessions =>
+      _list(_kSessions, CompanionSessionLog.fromJson);
+  Future<void> saveSessions(List<CompanionSessionLog> s) =>
+      _saveList(_kSessions, s.map((e) => e.toJson()).toList());
+
+  List<PatternAlert> get alerts => _list(_kAlerts, PatternAlert.fromJson);
+  Future<void> saveAlerts(List<PatternAlert> a) =>
+      _saveList(_kAlerts, a.map((e) => e.toJson()).toList());
+
+  CompanionSettings get companionSettings {
+    final raw = _prefs.getString(_kCompanion);
+    if (raw == null) return const CompanionSettings();
+    try {
+      return CompanionSettings.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      );
+    } on FormatException {
+      return const CompanionSettings();
+    }
+  }
+
+  Future<void> saveCompanionSettings(CompanionSettings c) =>
+      _prefs.setString(_kCompanion, jsonEncode(c.toJson()));
+
+  AlertPermissions get alertPermissions {
+    final raw = _prefs.getString(_kAlertPerms);
+    if (raw == null) return const AlertPermissions();
+    try {
+      return AlertPermissions.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      );
+    } on FormatException {
+      return const AlertPermissions();
+    }
+  }
+
+  Future<void> saveAlertPermissions(AlertPermissions a) =>
+      _prefs.setString(_kAlertPerms, jsonEncode(a.toJson()));
+
+  /// Gemini free-tier key from Google AI Studio, entered by the family.
+  String get geminiKey => _prefs.getString(_kGeminiKey) ?? '';
+  String get geminiModel =>
+      _prefs.getString(_kGeminiModel) ?? 'gemini-2.5-flash';
+  Future<void> saveGemini({required String key, required String model}) async {
+    await _prefs.setString(_kGeminiKey, key.trim());
+    await _prefs.setString(
+      _kGeminiModel,
+      model.trim().isEmpty ? 'gemini-2.5-flash' : model.trim(),
+    );
+  }
+
+  /// When the app was first set up on this phone.
+  DateTime? get firstUse {
+    final raw = _prefs.getString(_kFirstUse);
+    return raw == null ? null : DateTime.tryParse(raw);
+  }
+
+  Future<void> saveFirstUse(DateTime d) =>
+      _prefs.setString(_kFirstUse, d.toIso8601String());
 }
