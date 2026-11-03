@@ -29,7 +29,11 @@ class Contact {
     this.group = ContactGroup.friend,
     this.birthdayMonth,
     this.birthdayDay,
+    this.nearby = false,
   });
+
+  /// Lives within walking distance (Phase 5: "walk together tomorrow?").
+  final bool nearby;
 
   final String id;
   final String name;
@@ -53,7 +57,9 @@ class Contact {
     int? birthdayMonth,
     int? birthdayDay,
     bool clearBirthday = false,
+    bool? nearby,
   }) => Contact(
+    nearby: nearby ?? this.nearby,
     id: id,
     name: name ?? this.name,
     phone: phone ?? this.phone,
@@ -73,9 +79,11 @@ class Contact {
     'group': group.name,
     'birthdayMonth': birthdayMonth,
     'birthdayDay': birthdayDay,
+    'nearby': nearby,
   };
 
   factory Contact.fromJson(Map<String, dynamic> j) => Contact(
+    nearby: j['nearby'] as bool? ?? false,
     id: j['id'] as String,
     name: j['name'] as String? ?? '',
     phone: j['phone'] as String? ?? '',
@@ -471,28 +479,47 @@ class SharingSettings {
     this.health = false,
     this.sleep = false,
     this.plan = false,
+    this.walk = false,
+    this.sleepHours = false,
   });
   final bool health;
   final bool sleep;
   final bool plan;
 
-  SharingSettings copyWith({bool? health, bool? sleep, bool? plan}) =>
-      SharingSettings(
-        health: health ?? this.health,
-        sleep: sleep ?? this.sleep,
-        plan: plan ?? this.plan,
-      );
+  /// Phase 5: which days he walked (never step counts).
+  final bool walk;
+
+  /// Phase 5: hours slept from the band or his taps.
+  final bool sleepHours;
+
+  SharingSettings copyWith({
+    bool? health,
+    bool? sleep,
+    bool? plan,
+    bool? walk,
+    bool? sleepHours,
+  }) => SharingSettings(
+    health: health ?? this.health,
+    sleep: sleep ?? this.sleep,
+    plan: plan ?? this.plan,
+    walk: walk ?? this.walk,
+    sleepHours: sleepHours ?? this.sleepHours,
+  );
 
   Map<String, dynamic> toJson() => {
     'health': health,
     'sleep': sleep,
     'plan': plan,
+    'walk': walk,
+    'sleepHours': sleepHours,
   };
 
   factory SharingSettings.fromJson(Map<String, dynamic> j) => SharingSettings(
     health: j['health'] as bool? ?? false,
     sleep: j['sleep'] as bool? ?? false,
     plan: j['plan'] as bool? ?? false,
+    walk: j['walk'] as bool? ?? false,
+    sleepHours: j['sleepHours'] as bool? ?? false,
   );
 }
 
@@ -992,4 +1019,155 @@ class CircleAnswer {
   final String audioPath;
   final DateTime createdAt;
   final bool mine;
+}
+
+// ============================================================== Phase 5
+
+/// One night's sleep. Hours come from his correction, else the band, else
+/// his own bedtime/wake taps. Keyed by the morning's dayKey.
+class NightSleep {
+  const NightSleep({
+    required this.day,
+    this.bandMinutes,
+    this.bandBed,
+    this.bandWake,
+    this.selfBed,
+    this.selfWake,
+    this.correctedMinutes,
+  });
+
+  final String day;
+  final int? bandMinutes;
+  final DateTime? bandBed;
+  final DateTime? bandWake;
+  final DateTime? selfBed;
+  final DateTime? selfWake;
+
+  /// He said the band got it wrong and gave the right hours.
+  final int? correctedMinutes;
+
+  int? get selfMinutes =>
+      selfBed != null && selfWake != null && selfWake!.isAfter(selfBed!)
+      ? selfWake!.difference(selfBed!).inMinutes
+      : null;
+
+  int? get minutes => correctedMinutes ?? bandMinutes ?? selfMinutes;
+  double? get hours => minutes == null ? null : minutes! / 60;
+  bool get fromBand => correctedMinutes == null && bandMinutes != null;
+
+  NightSleep copyWith({
+    int? bandMinutes,
+    DateTime? bandBed,
+    DateTime? bandWake,
+    DateTime? selfBed,
+    DateTime? selfWake,
+    int? correctedMinutes,
+  }) => NightSleep(
+    day: day,
+    bandMinutes: bandMinutes ?? this.bandMinutes,
+    bandBed: bandBed ?? this.bandBed,
+    bandWake: bandWake ?? this.bandWake,
+    selfBed: selfBed ?? this.selfBed,
+    selfWake: selfWake ?? this.selfWake,
+    correctedMinutes: correctedMinutes ?? this.correctedMinutes,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'day': day,
+    'bandMinutes': bandMinutes,
+    'bandBed': bandBed?.toIso8601String(),
+    'bandWake': bandWake?.toIso8601String(),
+    'selfBed': selfBed?.toIso8601String(),
+    'selfWake': selfWake?.toIso8601String(),
+    'correctedMinutes': correctedMinutes,
+  };
+
+  static DateTime? _d(dynamic v) =>
+      v == null ? null : DateTime.parse(v as String);
+
+  factory NightSleep.fromJson(Map<String, dynamic> j) => NightSleep(
+    day: j['day'] as String,
+    bandMinutes: j['bandMinutes'] as int?,
+    bandBed: _d(j['bandBed']),
+    bandWake: _d(j['bandWake']),
+    selfBed: _d(j['selfBed']),
+    selfWake: _d(j['selfWake']),
+    correctedMinutes: j['correctedMinutes'] as int?,
+  );
+}
+
+/// One day of activity from the band. Steps are kept for the doctor page
+/// only; his own screens show walk days, never counts.
+class DayActivity {
+  const DayActivity({
+    required this.day,
+    required this.steps,
+    required this.walkMinutes,
+    this.restingHr,
+  });
+  final String day;
+  final int steps;
+
+  /// Minutes in walks of 10+ minutes.
+  final int walkMinutes;
+  final int? restingHr;
+
+  bool get walked => walkMinutes >= 10;
+
+  Map<String, dynamic> toJson() => {
+    'day': day,
+    'steps': steps,
+    'walkMinutes': walkMinutes,
+    'restingHr': restingHr,
+  };
+
+  factory DayActivity.fromJson(Map<String, dynamic> j) => DayActivity(
+    day: j['day'] as String,
+    steps: j['steps'] as int? ?? 0,
+    walkMinutes: j['walkMinutes'] as int? ?? 0,
+    restingHr: j['restingHr'] as int?,
+  );
+}
+
+/// Band and walking settings, set up by Ragul with him.
+class BandSettings {
+  const BandSettings({
+    this.connectedSince,
+    this.doctorCleared = false,
+    this.doctorWords = '',
+  });
+
+  /// When Health Connect access was first granted.
+  final DateTime? connectedSince;
+
+  /// His physician has cleared him to start walking. Until then the app
+  /// suggests no walking at all.
+  final bool doctorCleared;
+
+  /// What the doctor said, shown as the doctor's words (any target lives here).
+  final String doctorWords;
+
+  BandSettings copyWith({
+    DateTime? connectedSince,
+    bool? doctorCleared,
+    String? doctorWords,
+  }) => BandSettings(
+    connectedSince: connectedSince ?? this.connectedSince,
+    doctorCleared: doctorCleared ?? this.doctorCleared,
+    doctorWords: doctorWords ?? this.doctorWords,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'connectedSince': connectedSince?.toIso8601String(),
+    'doctorCleared': doctorCleared,
+    'doctorWords': doctorWords,
+  };
+
+  factory BandSettings.fromJson(Map<String, dynamic> j) => BandSettings(
+    connectedSince: j['connectedSince'] == null
+        ? null
+        : DateTime.parse(j['connectedSince'] as String),
+    doctorCleared: j['doctorCleared'] as bool? ?? false,
+    doctorWords: j['doctorWords'] as String? ?? '',
+  );
 }

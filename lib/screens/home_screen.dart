@@ -33,7 +33,7 @@ class HomeScreen extends StatelessWidget {
     final contact = s.todaysContact;
     final call = s.todaysCall;
     final morning = now.hour >= 4 && now.hour < 12;
-    final needsSleep = morning && s.todaysSleep == null;
+    final needsSleep = morning && (s.todaysSleep == null || s.askSleepHours);
 
     String callSubtitle;
     if (call != null) {

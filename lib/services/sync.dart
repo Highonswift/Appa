@@ -158,6 +158,17 @@ abstract class FamilySync {
     required String authorName,
   });
   Future<String> circleSignedUrl(String path);
+
+  // ---------------------------------------------------------- Phase 5
+
+  /// Appa: per-day sleep hours and walked/not, only the columns he shares
+  /// (others are sent as null). Never step counts.
+  Future<void> upsertBody(
+    List<({String day, int? sleepMinutes, bool? walked})> rows,
+  );
+
+  /// Family: what he shares.
+  Future<List<({String day, int? sleepMinutes, bool? walked})>> fetchBody();
 }
 
 class FamilyAlert {
@@ -408,6 +419,8 @@ class SupabaseFamilySync implements FamilySync {
       'health': s.health,
       'sleep': s.sleep,
       'plan': s.plan,
+      'walk': s.walk,
+      'sleep_hours': s.sleepHours,
     });
     if (!s.health) await clearShared('health');
     if (!s.sleep) await clearShared('sleep');
@@ -418,11 +431,11 @@ class SupabaseFamilySync implements FamilySync {
   Future<SharingSettings> fetchSharing() async {
     final row = await _c
         .from('sharing')
-        .select('health, sleep, plan')
+        .select('health, sleep, plan, walk, sleep_hours')
         .eq('household_id', _hh)
         .maybeSingle();
     if (row == null) return const SharingSettings();
-    return SharingSettings.fromJson(row);
+    return SharingSettings.fromJson({...row, 'sleepHours': row['sleep_hours']});
   }
 
   @override
@@ -927,6 +940,41 @@ class SupabaseFamilySync implements FamilySync {
   @override
   Future<String> circleSignedUrl(String path) =>
       _c.storage.from('circle').createSignedUrl(path, 60 * 60);
+  // ---------------------------------------------------------- Phase 5
+
+  @override
+  Future<void> upsertBody(
+    List<({String day, int? sleepMinutes, bool? walked})> rows,
+  ) async {
+    if (rows.isEmpty) return;
+    await _c.from('body_days').upsert([
+      for (final r in rows)
+        {
+          'household_id': _hh,
+          'day': r.day,
+          'sleep_minutes': r.sleepMinutes,
+          'walked': r.walked,
+        },
+    ], onConflict: 'household_id,day');
+  }
+
+  @override
+  Future<List<({String day, int? sleepMinutes, bool? walked})>>
+  fetchBody() async {
+    final rows = await _c
+        .from('body_days')
+        .select('day, sleep_minutes, walked')
+        .eq('household_id', _hh)
+        .order('day');
+    return [
+      for (final r in rows)
+        (
+          day: r['day'] as String,
+          sleepMinutes: r['sleep_minutes'] as int?,
+          walked: r['walked'] as bool?,
+        ),
+    ];
+  }
 }
 
 /// Used when sync is not set up. Every remote call is a quiet no-op.
@@ -1075,4 +1123,11 @@ class NoFamilySync implements FamilySync {
   @override
   Future<String> circleSignedUrl(String path) =>
       throw UnsupportedError('no sync');
+  @override
+  Future<void> upsertBody(
+    List<({String day, int? sleepMinutes, bool? walked})> rows,
+  ) async {}
+  @override
+  Future<List<({String day, int? sleepMinutes, bool? walked})>>
+  fetchBody() async => [];
 }

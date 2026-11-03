@@ -1,4 +1,4 @@
-# Appa App — Phases 1 to 4
+# Appa App — Phases 1 to 5
 
 A Tamil-first, voice-first Android app for Appa, built from the
 [product roadmap](https://claude.ai/artifact/B9DWTfLX9QfvY3wMPEGWxP). It is a bridge to
@@ -51,6 +51,18 @@ request a day) and settings.
 The weekly review now also tracks the Phase 4 exit criteria: outside questions answered, events attended,
 repair and ledger entries.
 
+**Phase 5 — sleep and walking (with the fitness band):**
+
+| Feature | What it does |
+|---|---|
+| Hours slept | After the morning rating, two optional taps: when he slept, when he woke. Once the band is connected, its hours fill in automatically and he can correct a night it got wrong. An 8-week line on the health screen. |
+| The band, via Health Connect | Read-only access to sleep sessions, steps and resting heart rate that the band's own app writes into Android Health Connect (free). Set up in settings → கைப்பட்டை. |
+| Walk days | Walks of 10+ minutes at an easy pace (pottering doesn't count) show as a 7-day row of walk days. **No step count on his screens, no targets, no streaks**; a walk ticks the walk item in that day's plan. |
+| Getting him walking | Nothing is suggested until the family switches on "மருத்துவர் நடக்கச் சரி என்றார்" (doctor has cleared him) and, optionally, types the doctor's words. Then the plan offers errands on foot, and calls with a contact marked "within walking distance" suggest "நாளை காலை சேர்ந்து நடக்கலாமா?" with one tap to add it to tomorrow's plan. |
+| Doctor page | Adds 30-day average sleep, walk days, average steps and resting heart rate — the only place step counts appear. |
+| Sharing | Two new switches, "நடை" (which days he walked) and "தூக்க நேரம்" (hours slept), off by default. Steps, heart rate and bed/wake times never leave his phone. |
+| Patterns | A night with no rating but under 4½ band hours counts towards the bad-sleep alert; his own rating always wins. No "you haven't walked" alert. |
+
 Still left out: his own bank's app and pension-portal walkthroughs (need his real details first),
 dish photos, and push notifications (family and circle members see new items when they open the app).
 
@@ -83,7 +95,7 @@ and Android Studio (for the Android SDK). Both are free.
 ```bash
 cd /Users/ragulkts/Highonswift/Appa
 flutter pub get
-flutter test                 # 101 tests
+flutter test                 # 120 tests
 flutter run                  # with Appa's phone plugged in, USB debugging on
 flutter build apk --release  # APK at build/app/outputs/flutter-apk/app-release.apk
 ```
@@ -103,7 +115,11 @@ family phones by hand. Create a real signing key before any Play Store upload.
 5. For the companion and transcripts (optional): get a free key at
    [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and paste it in settings under
    **பேசும் வசதி (Gemini, இலவசம்)**. Without a key the "பேசலாம்" tile stays hidden.
-6. Sit with him for the first use, and for his first companion conversation.
+6. When the band arrives: pair it with its own app, check that app's settings sync to
+   **Health Connect** (Android 14+ has it built in; older phones install it from the Play Store),
+   then in settings → **கைப்பட்டை** tap **கைப்பட்டையை இணை** and allow sleep, steps and resting
+   heart rate. After his doctor's go-ahead, switch on **மருத்துவர் நடக்கச் சரி என்றார்**.
+7. Sit with him for the first use, and for his first companion conversation.
 
 ### Family sync (optional, free)
 
@@ -112,8 +128,8 @@ his phone during a visit. To let family listen and reply from their own phones:
 
 1. Create a free project at [supabase.com](https://supabase.com).
 2. In the dashboard: **SQL Editor → New query →** paste `supabase/schema.sql` **→ Run**, then
-   the same for `supabase/migrations/002_phase2.sql`, `003_phase3.sql` and `004_phase4.sql`, in
-   order (already set up earlier? run only the ones you haven't).
+   the same for `supabase/migrations/002_phase2.sql` to `005_phase5.sql`, in order (already set
+   up earlier? run only the ones you haven't).
 3. **Authentication → Sign In / Providers →** turn on **Allow anonymous sign-ins**.
 4. **Project Settings → API**: copy the Project URL and the publishable (anon) key.
 5. On Appa's phone: settings → paste both → **பகிர்தலைத் தொடங்கு** (start sharing). It shows a
@@ -147,6 +163,8 @@ lib/
   logic/companion.dart      the companion's agent layer: system prompt + enforced rules
   logic/archive_export.dart story archive zip (audio + transcript text)
   logic/phase4.dart         spoken ledger parsing, month totals, events, ISO weeks, circle prompts (pure)
+  logic/phase5.dart         band spans -> nights and walks, walk days, sleep/doctor summaries (pure)
+  services/band.dart        BandReader: Health Connect (read-only) via the `health` package, fake
   services/companion_model.dart  CompanionModel interface, Gemini REST implementation, fake
   services/                 speech, dictation + sharing, audio, reminders, phone, sync (each with a fake)
   widgets/health_chart.dart two-series line chart with legend, end labels, tap-to-read
@@ -159,6 +177,7 @@ supabase/migrations/        002_phase2.sql: questions, plan, health, sleep, shar
                             003_phase3.sql: story follow-ups, transcripts, pattern alerts
                             004_phase4.sql: guest role locked out of all family data, help code,
                             outside questions, events, retirees circle (own tables + bucket)
+                            005_phase5.sql: sleep hours / walked per day, shared columns only
 test/                       unit tests (logic) + widget tests (screens)
 ```
 
@@ -190,6 +209,10 @@ test/                       unit tests (logic) + widget tests (screens)
   app as "நண்பர்" and join the circle before telling him about it, so it isn't empty.
 - **Phase 4 exit criteria.** At least five questions answered from outside the immediate family; at
   least two local events attended through the app; diary or ledger entries he made unprompted.
+- **Phase 5.** Get his physician's go-ahead (and words) before switching on walking suggestions.
+  Exit criteria: he wears the band most nights for four weeks; by week 24 he walks at least two days a
+  week, at least one with someone; the doctor page has been shown at one visit. Stop and rethink if the
+  band stays on the charger for a week or the numbers become a new worry.
 - **Earlier exit criteria.** Phase 1: used on 10 of 14 days unprompted, at least 5 stories,
   at least 3 calls from the nudge, at least 10 complaints. Phase 2: at least 4 walkthroughs and one
   real thing done without help, 6 family questions answered, a visible sleep trend, and Amma's

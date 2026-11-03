@@ -11,6 +11,7 @@ import 'screens/routine_screen.dart';
 import 'screens/setup_screen.dart';
 import 'screens/world_screens.dart';
 import 'services/audio.dart';
+import 'services/band.dart';
 import 'services/dictation.dart';
 import 'services/phone.dart';
 import 'services/reminders.dart';
@@ -33,6 +34,7 @@ Future<void> main() async {
     sync: SupabaseFamilySync(),
     dictation: DeviceDictation(),
     sharer: DeviceSharer(),
+    band: HealthConnectBand(),
   );
 
   await reminders.init(onTap: _openFromReminder);
@@ -47,6 +49,7 @@ Future<void> main() async {
     // Phase 3: today's follow-up question and any pattern to raise with him.
     await state.ensureTodaysFollowUp();
     await state.checkPatterns();
+    state.syncBand(); // Phase 5: last nights and walks from the band, if connected.
   }
 
   runApp(AppaApp(state: state));

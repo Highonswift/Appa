@@ -114,6 +114,21 @@ class SharingScreen extends StatelessWidget {
             value: sh.plan,
             onChanged: (v) => s.updateSharing(sh.copyWith(plan: v)),
           ),
+          item(
+            icon: Icons.directions_walk,
+            title: 'நடை',
+            detail: 'எந்த நாட்களில் நடந்தீர்கள் என்பது மட்டும். அடிகளின் எண்ணிக்கை இல்லை.',
+            value: sh.walk,
+            onChanged: (v) => s.updateSharing(sh.copyWith(walk: v)),
+          ),
+          item(
+            icon: Icons.nights_stay,
+            title: 'தூக்க நேரம்',
+            detail:
+                'ஒவ்வொரு இரவும் எத்தனை மணி நேரம் தூங்கினீர்கள் என்பது மட்டும்.',
+            value: sh.sleepHours,
+            onChanged: (v) => s.updateSharing(sh.copyWith(sleepHours: v)),
+          ),
           const SizedBox(height: 16),
           Text('எப்போது ${s.familyPerson}-இடம் சொல்லலாம்', style: t.titleLarge),
           const SizedBox(height: 6),
@@ -212,6 +227,17 @@ class ReviewScreen extends StatelessWidget {
             '${r.questionsAnswered} / ${r.questionsWaiting}',
           ),
           row('கதைத் தொகுப்பு (இலக்கு 40)', '${s.stories.length}'),
+          row('நடந்த நாட்கள் (இந்த வாரம்)', '${s.body7.walkDays} / 7'),
+          if (s.body7.avgSleepHours != null)
+            row(
+              'சராசரி தூக்கம் (இந்த வாரம்)',
+              '${s.body7.avgSleepHours!.toStringAsFixed(1)} மணி',
+            ),
+          if (s.bandSettings.connectedSince != null)
+            row(
+              'கைப்பட்டை அணிந்த இரவுகள் (இந்த வாரம்)',
+              '${s.body7.bandNights} / 7',
+            ),
           row(
             'வெளியாட்களுக்குப் பதில் (இலக்கு 5)',
             '${s.purpose.outsideAnswered}',

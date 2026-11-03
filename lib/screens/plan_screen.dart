@@ -92,9 +92,10 @@ class _PlanScreenState extends State<PlanScreen> {
             spacing: 10,
             runSpacing: 10,
             children: [
-              for (final sug in planSuggestions.where(
-                (x) => !existing.contains(x),
-              ))
+              for (final sug in [
+                ...planSuggestions,
+                ...s.walkSuggestions,
+              ].where((x) => !existing.contains(x)))
                 ActionChip(
                   label: Text(sug, style: const TextStyle(fontSize: 20)),
                   avatar: const Icon(Icons.add, size: 24),

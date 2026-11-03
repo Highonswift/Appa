@@ -1,5 +1,6 @@
 import '../data/festivals.dart';
 import '../models/models.dart';
+import 'phase5.dart' show badNight;
 
 /// Pure Phase 3 rules: who to suggest, which occasions are coming, which
 /// follow-up becomes today's question, which patterns to raise with him, and
@@ -172,6 +173,7 @@ Set<PatternKind> detectPatterns({
   required List<CompanionSessionLog> sessions,
   required List<PatternAlert> alerts,
   required DateTime? firstUse,
+  List<NightSleep> nights = const [],
 }) {
   final today = DateTime(now.year, now.month, now.day);
   final found = <PatternKind>{};
@@ -180,7 +182,14 @@ Set<PatternKind> detectPatterns({
     for (var i = 0; i < 4; i++) {
       final key = dayKey(end.subtract(Duration(days: i)));
       final e = sleep.where((s) => s.day == key);
-      if (e.isEmpty || e.last.rating != SleepRating.bad) return false;
+      final n = nights.where((x) => x.day == key);
+      // Phase 5: band hours count as evidence only when he gave no rating.
+      if (!badNight(
+        e.isEmpty ? null : e.last.rating,
+        n.isEmpty ? null : n.last,
+      )) {
+        return false;
+      }
     }
     return true;
   }

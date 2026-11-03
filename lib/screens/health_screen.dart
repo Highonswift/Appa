@@ -8,6 +8,7 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/health_chart.dart';
+import '../logic/phase5.dart';
 
 const _kindTitle = {
   HealthKind.bp: 'BP (இரத்த அழுத்தம்)',
@@ -314,6 +315,22 @@ class DoctorSummaryScreen extends StatelessWidget {
           b.writeln('${_date(e.at)} ${_time(e.at)}  ${e.display}');
         }
       }
+      final body = s.body30;
+      if (body.nightsWithHours > 0 || body.avgSteps != null) {
+        b.writeln('\nதூக்கமும் நடையும் (30 நாள்)');
+        if (body.avgSleepHours != null) {
+          b.writeln(
+            'சராசரி தூக்கம்: ${body.avgSleepHours!.toStringAsFixed(1)} மணி (${body.nightsWithHours} இரவுகள்)',
+          );
+        }
+        b.writeln('நடந்த நாட்கள்: ${body.walkDays}');
+        if (body.avgSteps != null) {
+          b.writeln('சராசரி அடிகள்/நாள்: ${body.avgSteps}');
+        }
+        if (body.avgRestingHr != null) {
+          b.writeln('ஓய்வு இதயத் துடிப்பு: ${body.avgRestingHr}/நிமி');
+        }
+      }
       return b.toString();
     }
 
@@ -328,12 +345,60 @@ class DoctorSummaryScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           for (final k in HealthKind.values) block(k),
+          _BodyBlock(sum: s.body30),
           OutlinedButton.icon(
             onPressed: () => s.sharer.shareText(asText()),
             icon: const Icon(Icons.share, size: 28),
             label: const Text('அனுப்பு (WhatsApp / SMS)'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Sleep, walking and resting heart rate for the doctor (Phase 5). Step
+/// counts appear only here, never on his own screens.
+class _BodyBlock extends StatelessWidget {
+  const _BodyBlock({required this.sum});
+  final BodySummary sum;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    if (sum.nightsWithHours == 0 && sum.avgSteps == null) {
+      return const SizedBox.shrink();
+    }
+    Widget row(String a, String b) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(child: Text(a, style: t.bodyLarge)),
+          Text(b, style: t.titleMedium),
+        ],
+      ),
+    );
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('தூக்கமும் நடையும்', style: t.titleLarge),
+            const SizedBox(height: 6),
+            if (sum.avgSleepHours != null)
+              row(
+                'சராசரி தூக்கம் (${sum.nightsWithHours} இரவுகள்)',
+                '${sum.avgSleepHours!.toStringAsFixed(1)} மணி',
+              ),
+            row('நடந்த நாட்கள் (30 நாளில்)', '${sum.walkDays}'),
+            if (sum.avgSteps != null)
+              row('சராசரி அடிகள் / நாள்', '${sum.avgSteps}'),
+            if (sum.avgRestingHr != null)
+              row('ஓய்வு இதயத் துடிப்பு', '${sum.avgRestingHr} / நிமி'),
+          ],
+        ),
       ),
     );
   }

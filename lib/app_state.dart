@@ -12,8 +12,10 @@ import 'logic/companion.dart';
 import 'logic/phase2.dart';
 import 'logic/phase3.dart';
 import 'logic/phase4.dart';
+import 'logic/phase5.dart';
 import 'models/models.dart';
 import 'services/audio.dart';
+import 'services/band.dart';
 import 'services/companion_model.dart';
 import 'services/dictation.dart';
 import 'services/phone.dart';
@@ -34,8 +36,10 @@ class AppState extends ChangeNotifier {
     required this.dictation,
     required this.sharer,
     CompanionModel? companionModel,
+    BandReader? band,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now,
+  }) : band = band ?? FakeBand(state: BandStatus.needsHealthConnect),
+       _clock = clock ?? DateTime.now,
        _fixedModel = companionModel {
     _load();
   }
@@ -52,6 +56,7 @@ class AppState extends ChangeNotifier {
   final FamilySync sync;
   final Dictation dictation;
   final Sharer sharer;
+  final BandReader band;
   final DateTime Function() _clock;
   static const _uuid = Uuid();
 
@@ -80,6 +85,9 @@ class AppState extends ChangeNotifier {
   late List<LedgerEntry> ledger;
   late bool ledgerEnabled;
   late List<LocalEvent> events;
+  late List<NightSleep> nights;
+  late List<DayActivity> activity;
+  late BandSettings bandSettings;
   late AlertPermissions alertPermissions;
   DateTime? firstUse;
 
@@ -114,6 +122,9 @@ class AppState extends ChangeNotifier {
     ledger = store.ledger;
     ledgerEnabled = store.ledgerEnabled;
     events = store.events;
+    nights = store.nights;
+    activity = store.activity;
+    bandSettings = store.band;
     _buildModel();
   }
 
@@ -371,6 +382,7 @@ class AppState extends ChangeNotifier {
         await pullPhase2();
         await pullPhase3();
         await pullPhase4();
+        await _pushBody(days: 90);
       } else {
         await loadFamilyExtras();
       }
@@ -592,6 +604,7 @@ class AppState extends ChangeNotifier {
       try {
         await sync.setSharing(s);
         await _pushShared();
+        await _pushBody(days: 90);
       } catch (e) {
         syncError = '$e';
       }
@@ -834,6 +847,9 @@ class AppState extends ChangeNotifier {
       familyHealth = familySharing.health ? await sync.fetchHealth() : [];
       familySleep = familySharing.sleep ? await sync.fetchSleep() : [];
       familyPlan = familySharing.plan ? await sync.fetchPlan() : [];
+      familyBody = familySharing.walk || familySharing.sleepHours
+          ? await sync.fetchBody()
+          : [];
       syncError = null;
     } catch (e) {
       syncError = '$e';
@@ -1150,6 +1166,7 @@ class AppState extends ChangeNotifier {
       sessions: sessions,
       alerts: alerts,
       firstUse: firstUse,
+      nights: nights,
     );
     if (found.isEmpty) return;
     for (final k in found) {
@@ -1606,4 +1623,197 @@ class AppState extends ChangeNotifier {
     repairs: repairs,
     ledger: ledger,
   );
+
+  // ================================================================ Phase 5
+
+  BandStatus? bandStatus;
+  bool bandSyncing = false;
+
+  NightSleep? nightFor(String day) =>
+      nights.where((n) => n.day == day).firstOrNull;
+  NightSleep? get lastNight => nightFor(todayKey);
+
+  /// Ask for bed/wake times after the rating, unless the band or he
+  /// already gave hours, or he said not today.
+  bool get askSleepHours =>
+      todaysSleep != null &&
+      lastNight?.minutes == null &&
+      store.hoursSkippedDay != todayKey;
+
+  Future<void> skipSleepHours() async {
+    await store.saveHoursSkippedDay(todayKey);
+    notifyListeners();
+  }
+
+  Future<void> _saveNight(NightSleep n) async {
+    nights = [...nights.where((x) => x.day != n.day), n];
+    await store.saveNights(nights);
+    notifyListeners();
+  }
+
+  /// His own taps on the morning check-in. [bedHour] in the evening means
+  /// the evening before; small hours mean after midnight.
+  Future<void> setSelfSleepTimes({
+    required int bedHour,
+    required int wakeHour,
+  }) async {
+    final t = DateTime(now.year, now.month, now.day);
+    final bed = bedHour >= 12
+        ? t.subtract(Duration(hours: 24 - bedHour))
+        : t.add(Duration(hours: bedHour));
+    final wake = t.add(Duration(hours: wakeHour));
+    final n = (nightFor(todayKey) ?? NightSleep(day: todayKey)).copyWith(
+      selfBed: bed,
+      selfWake: wake,
+    );
+    await _saveNight(n);
+    await _pushBody(days: 1);
+  }
+
+  /// He says the band got a night wrong.
+  Future<void> correctNight(String day, int minutes) async {
+    await _saveNight(
+      (nightFor(day) ?? NightSleep(day: day)).copyWith(
+        correctedMinutes: minutes,
+      ),
+    );
+    await _pushBody(days: 30);
+  }
+
+  Future<BandStatus> refreshBandStatus() async {
+    bandStatus = await band.status();
+    notifyListeners();
+    return bandStatus!;
+  }
+
+  /// Set up with Ragul: Health Connect's own permission screen, then a read.
+  Future<bool> connectBand() async {
+    final ok = await band.connect();
+    await refreshBandStatus();
+    if (ok && bandStatus == BandStatus.connected) {
+      if (bandSettings.connectedSince == null) {
+        bandSettings = bandSettings.copyWith(connectedSince: now);
+        await store.saveBand(bandSettings);
+      }
+      await syncBand();
+    }
+    return ok;
+  }
+
+  Future<void> updateBandSettings(BandSettings b) async {
+    bandSettings = b;
+    await store.saveBand(b);
+    notifyListeners();
+  }
+
+  /// Reads the last two weeks from the band (a month the first time):
+  /// nights, walks and resting heart rate. Ticks walk items in his plan.
+  Future<void> syncBand() async {
+    if (role != DeviceRole.appa) return;
+    if ((bandStatus ?? await refreshBandStatus()) != BandStatus.connected) {
+      return;
+    }
+    bandSyncing = true;
+    notifyListeners();
+    try {
+      final today = DateTime(now.year, now.month, now.day);
+      final span = activity.isEmpty ? 30 : 14;
+      final from = today.subtract(Duration(days: span));
+      final data = await band.read(
+        from.subtract(const Duration(hours: 12)),
+        now,
+      );
+      final days = [
+        for (var i = span; i >= 0; i--)
+          dayKey(today.subtract(Duration(days: i))),
+      ];
+
+      var nextNights = [...nights];
+      for (final d in days) {
+        final n = nightFromSpans(d, data.sleep);
+        if (n == null) continue;
+        final old =
+            nextNights.where((x) => x.day == d).firstOrNull ??
+            NightSleep(day: d);
+        nextNights = [
+          ...nextNights.where((x) => x.day != d),
+          old.copyWith(
+            bandMinutes: n.minutes,
+            bandBed: n.bed,
+            bandWake: n.wake,
+          ),
+        ];
+      }
+      nights = nextNights;
+
+      final fresh = dayActivities(days, data.steps, data.resting);
+      activity = [...activity.where((a) => !days.contains(a.day)), ...fresh];
+
+      // A recorded walk ticks the walk item in that day's plan.
+      final walked = {for (final a in fresh.where((a) => a.walked)) a.day};
+      var ticked = false;
+      planItems = [
+        for (final p in planItems)
+          if (!p.done && walked.contains(p.day) && isWalkItem(p.text))
+            () {
+              ticked = true;
+              return p.copyWith(done: true);
+            }()
+          else
+            p,
+      ];
+      await store.saveNights(nights);
+      await store.saveActivity(activity);
+      if (ticked) await store.savePlanItems(planItems);
+      await _pushBody(days: span);
+    } catch (e) {
+      syncError = '$e';
+    } finally {
+      bandSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  /// Mirrors sleep hours / walked for the shared columns only; unshared
+  /// columns go up as null, which also clears an earlier copy.
+  Future<void> _pushBody({required int days}) async {
+    if (role != DeviceRole.appa || !sync.connected) return;
+    final today = DateTime(now.year, now.month, now.day);
+    final keys = [
+      for (var i = days - 1; i >= 0; i--)
+        dayKey(today.subtract(Duration(days: i))),
+    ];
+    final rows = [
+      for (final d in keys)
+        if (nightFor(d) != null || activity.any((a) => a.day == d))
+          (
+            day: d,
+            sleepMinutes: sharing.sleepHours ? nightFor(d)?.minutes : null,
+            walked: sharing.walk
+                ? activity.where((a) => a.day == d).firstOrNull?.walked
+                : null,
+          ),
+    ];
+    try {
+      await sync.upsertBody(rows);
+    } catch (e) {
+      syncError = '$e';
+    }
+  }
+
+  List<(DateTime, double)> get sleepHours => sleepHoursSeries(now, nights);
+  List<bool> get walkWeek => walkDays(now, activity);
+  BodySummary get body30 => bodySummary(now, nights, activity);
+  BodySummary get body7 => bodySummary(now, nights, activity, days: 7);
+
+  /// Walking suggestions appear only after his doctor has cleared him.
+  List<String> get walkSuggestions =>
+      bandSettings.doctorCleared ? walkErrands : const [];
+
+  /// Adds "walk with [c] tomorrow morning" to tomorrow's plan.
+  Future<void> planWalkWith(Contact c) =>
+      addPlanItem('காலை நடை — ${c.name}-உடன்', day: tomorrowKey);
+
+  // Family phone
+  List<({String day, int? sleepMinutes, bool? walked})> familyBody = [];
 }
