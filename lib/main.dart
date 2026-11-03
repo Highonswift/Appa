@@ -9,6 +9,7 @@ import 'screens/family_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/routine_screen.dart';
 import 'screens/setup_screen.dart';
+import 'screens/world_screens.dart';
 import 'services/audio.dart';
 import 'services/dictation.dart';
 import 'services/phone.dart';
@@ -99,8 +100,10 @@ class _Root extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.watch<AppState>();
     if (!s.isSetUp) return const SetupScreen();
-    return s.role == DeviceRole.appa
-        ? const HomeScreen()
-        : const FamilyHomeScreen();
+    return switch (s.role!) {
+      DeviceRole.appa => const HomeScreen(),
+      DeviceRole.family => const FamilyHomeScreen(),
+      DeviceRole.friend => const FriendHomeScreen(),
+    };
   }
 }

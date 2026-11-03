@@ -43,6 +43,14 @@ class LocalStore {
   static const _kGeminiKey = 'geminiKey';
   static const _kGeminiModel = 'geminiModel';
   static const _kFirstUse = 'firstUse';
+  static const _kRepairs = 'repairs';
+  static const _kLedger = 'ledger';
+  static const _kLedgerOn = 'ledgerEnabled';
+  static const _kEvents = 'events';
+  static const _kHelpCode = 'helpCode';
+  static const _kHelpJoined = 'helpJoined';
+  static const _kCircleId = 'circleId';
+  static const _kCircleCode = 'circleCode';
 
   DeviceRole? get role {
     final r = _prefs.getString(_kRole);
@@ -249,4 +257,42 @@ class LocalStore {
 
   Future<void> saveFirstUse(DateTime d) =>
       _prefs.setString(_kFirstUse, d.toIso8601String());
+
+  // ------------------------------------------------------------ Phase 4
+
+  List<RepairEntry> get repairs => _list(_kRepairs, RepairEntry.fromJson);
+  Future<void> saveRepairs(List<RepairEntry> r) =>
+      _saveList(_kRepairs, r.map((e) => e.toJson()).toList());
+
+  List<LedgerEntry> get ledger => _list(_kLedger, LedgerEntry.fromJson);
+  Future<void> saveLedger(List<LedgerEntry> l) =>
+      _saveList(_kLedger, l.map((e) => e.toJson()).toList());
+
+  /// Off until he turns it on (roadmap: "Only if he wants it").
+  bool get ledgerEnabled => _prefs.getBool(_kLedgerOn) ?? false;
+  Future<void> setLedgerEnabled(bool v) => _prefs.setBool(_kLedgerOn, v);
+
+  List<LocalEvent> get events => _list(_kEvents, LocalEvent.fromJson);
+  Future<void> saveEvents(List<LocalEvent> e) =>
+      _saveList(_kEvents, e.map((x) => x.toJson()).toList());
+
+  /// Events he has answered "did you go?" for.
+  Set<String> get eventsAnswered =>
+      (_prefs.getStringList('eventsAnswered') ?? []).toSet();
+  Future<void> saveEventsAnswered(Set<String> ids) =>
+      _prefs.setStringList('eventsAnswered', ids.toList());
+
+  String? get helpCode => _prefs.getString(_kHelpCode);
+  Future<void> saveHelpCode(String c) => _prefs.setString(_kHelpCode, c);
+
+  /// Friend phone: joined Appa's help code.
+  bool get helpJoined => _prefs.getBool(_kHelpJoined) ?? false;
+  Future<void> setHelpJoined(bool v) => _prefs.setBool(_kHelpJoined, v);
+
+  String? get circleId => _prefs.getString(_kCircleId);
+  String? get circleCode => _prefs.getString(_kCircleCode);
+  Future<void> saveCircle({required String id, String? code}) async {
+    await _prefs.setString(_kCircleId, id);
+    if (code != null) await _prefs.setString(_kCircleCode, code);
+  }
 }
