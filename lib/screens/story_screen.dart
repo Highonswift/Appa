@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/recorder.dart';
+import 'archive_screen.dart';
 
 /// Story of the day: one question, spoken aloud; he answers by voice.
 /// Family hear it and reply with a voice note.
@@ -21,8 +22,10 @@ class _StoryScreenState extends State<StoryScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final s = context.read<AppState>();
+      // A family follow-up waiting since yesterday becomes today's question.
+      await s.ensureTodaysFollowUp();
       if (!s.answeredToday) {
         s.speaker.speak('இன்றைய கேள்வி. ${s.todaysPrompt.tamil}');
       }
@@ -78,6 +81,14 @@ class _StoryScreenState extends State<StoryScreen> {
           ],
           const SizedBox(height: 36),
           if (s.stories.isNotEmpty) ...[
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const ArchiveScreen())),
+              icon: const Icon(Icons.collections_bookmark, size: 28),
+              label: Text('கதைத் தொகுப்பு (${s.stories.length})'),
+            ),
+            const SizedBox(height: 20),
             Text('உங்கள் கதைகள் (${s.stories.length})', style: t.titleLarge),
             const SizedBox(height: 12),
             for (final story in s.stories) ...[
@@ -173,6 +184,25 @@ class StoryDetailScreen extends StatelessWidget {
               icon: const Icon(Icons.play_arrow_rounded, size: 38),
               label: const Text('உங்கள் கதையைக் கேளுங்கள்'),
             ),
+          if (story.transcript != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(story.transcript!, style: t.bodyLarge),
+            ),
+          ] else if (s.companionModel.configured &&
+              story.localAudioPath != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => s.transcribeStory(story.id),
+              icon: const Icon(Icons.text_snippet, size: 28),
+              label: const Text('எழுத்தாக்கு'),
+            ),
+          ],
           const SizedBox(height: 28),
           Text('குடும்பத்தினர் பதில்கள்', style: t.titleLarge),
           const SizedBox(height: 12),
@@ -212,6 +242,8 @@ class StoryDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _LocalReply(storyId: story.id),
+          const SizedBox(height: 16),
+          _LocalFollowUp(storyId: story.id),
         ],
       ),
     );
@@ -268,6 +300,74 @@ class _LocalReplyState extends State<_LocalReply> {
             );
             if (mounted) setState(() => open = false);
           },
+        ),
+      ],
+    );
+  }
+}
+
+/// A family member on a visit asks a follow-up; it becomes a later day's
+/// story question.
+class _LocalFollowUp extends StatefulWidget {
+  const _LocalFollowUp({required this.storyId});
+  final String storyId;
+  @override
+  State<_LocalFollowUp> createState() => _LocalFollowUpState();
+}
+
+class _LocalFollowUpState extends State<_LocalFollowUp> {
+  final name = TextEditingController();
+  final text = TextEditingController();
+  bool open = false;
+  bool done = false;
+
+  @override
+  void dispose() {
+    name.dispose();
+    text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (done) {
+      return const NoteBox(
+        icon: Icons.check_circle,
+        text: 'சேர்க்கப்பட்டது. நாளைய கதைக் கேள்வியாக வரும்.',
+      );
+    }
+    if (!open) {
+      return OutlinedButton.icon(
+        onPressed: () => setState(() => open = true),
+        icon: const Icon(Icons.quiz, size: 28),
+        label: const Text('இதைப் பற்றி இன்னொரு கேள்வி'),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: name,
+          decoration: const InputDecoration(labelText: 'உங்கள் பெயர்'),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: text,
+          decoration: const InputDecoration(
+            labelText: 'கேள்வி (உதா: அந்த பஸ் எந்த ரூட்டில் ஓடியது?)',
+          ),
+        ),
+        const SizedBox(height: 10),
+        FilledButton(
+          onPressed: () async {
+            await context.read<AppState>().addFollowUp(
+              storyId: widget.storyId,
+              text: text.text,
+              author: name.text.trim().isEmpty ? 'குடும்பம்' : name.text,
+            );
+            setState(() => done = true);
+          },
+          child: const Text('சேர்'),
         ),
       ],
     );

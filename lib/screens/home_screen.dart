@@ -6,6 +6,8 @@ import '../models/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'call_screen.dart';
+import 'companion_screen.dart';
+import '../logic/phase3.dart';
 import 'plan_screen.dart';
 import 'questions_screen.dart';
 import 'routine_screen.dart';
@@ -86,6 +88,13 @@ class HomeScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 20),
+              if (s.pendingAlert != null) ...[
+                AlertAskCard(alert: s.pendingAlert!),
+                const SizedBox(height: 16),
+              ],
+              for (final o in s.occasions.where(
+                (o) => o.kind == OccasionKind.birthday || o.daysAway == 0,
+              )) ...[OccasionCard(occasion: o), const SizedBox(height: 16)],
               if (needsSleep) ...[
                 const SleepCheckInCard(),
                 const SizedBox(height: 16),
@@ -120,6 +129,18 @@ class HomeScreen extends StatelessWidget {
                 soft: const Color(0xFFE2F2E5),
                 onTap: () => _open(context, const CallScreen()),
               ),
+              if (s.companionAvailable) ...[
+                const SizedBox(height: 16),
+                HomeTile(
+                  icon: Icons.record_voice_over,
+                  title: 'பேசலாம்',
+                  subtitle:
+                      'மனதில் இருப்பதைச் சொல்லுங்கள். சுமார் ${s.companionSettings.minutes} நிமிடம்.',
+                  color: const Color(0xFF5D4037),
+                  soft: const Color(0xFFEFE7E4),
+                  onTap: () => _open(context, const CompanionScreen()),
+                ),
+              ],
               const SizedBox(height: 16),
               HomeTile(
                 icon: Icons.checklist,
@@ -190,5 +211,53 @@ class HomeScreen extends StatelessWidget {
   void _open(BuildContext context, Widget screen) {
     context.read<AppState>().speaker.stop();
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+  }
+}
+
+/// The app tells Appa first and asks before telling his son (roadmap Phase 3
+/// "Pattern surfacing, with his consent").
+class AlertAskCard extends StatelessWidget {
+  const AlertAskCard({super.key, required this.alert});
+  final PatternAlert alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.read<AppState>();
+    final t = Theme.of(context).textTheme;
+    final q = alertQuestion(alert.kind, s.familyPerson);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.primary, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(q, style: t.titleMedium)),
+              SpeakButton(text: q, compact: true, label: ''),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${s.familyPerson}-க்கு ஒரு சிறு செய்தி மட்டும் போகும். நீங்கள் சொன்னது எதுவும் போகாது.',
+            style: t.bodyMedium?.copyWith(color: AppColors.muted),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: () => s.decideAlert(alert.id, tell: true),
+            child: Text('சரி, ${s.familyPerson}-இடம் சொல்லுங்கள்'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: () => s.decideAlert(alert.id, tell: false),
+            child: const Text('வேண்டாம்'),
+          ),
+        ],
+      ),
+    );
   }
 }

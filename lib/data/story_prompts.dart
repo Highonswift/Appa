@@ -166,3 +166,59 @@ const storyPrompts = <StoryPrompt>[
     'What is the biggest change you have seen in your town in your lifetime?',
   ),
 ];
+
+/// Story archive sections (roadmap Phase 3: "his childhood, his village, his
+/// TNSTC years, breakdowns he fixed, people he worked with").
+enum StoryTheme { childhood, tnstc, repairs, people, family, life }
+
+const storyThemeNames = {
+  StoryTheme.childhood: 'சிறுவயதும் ஊரும்',
+  StoryTheme.tnstc: 'TNSTC ஆண்டுகள்',
+  StoryTheme.repairs: 'சரிசெய்த பழுதுகள்',
+  StoryTheme.people: 'உடன் வேலை செய்தவர்கள்',
+  StoryTheme.family: 'குடும்பம்',
+  StoryTheme.life: 'வாழ்க்கைப் பாடங்கள்',
+};
+
+const _promptThemes = <String, StoryTheme>{
+  'tnstc-first-day': StoryTheme.tnstc,
+  'hardest-breakdown': StoryTheme.repairs,
+  'village-childhood': StoryTheme.childhood,
+  'first-mentor': StoryTheme.people,
+  'depot-friend': StoryTheme.people,
+  'first-salary': StoryTheme.tnstc,
+  'school-days': StoryTheme.childhood,
+  'night-shift': StoryTheme.tnstc,
+  'engine-advice': StoryTheme.repairs,
+  'wedding-day': StoryTheme.family,
+  'festival-memory': StoryTheme.childhood,
+  'proudest-work': StoryTheme.tnstc,
+  'old-buses': StoryTheme.tnstc,
+  'father-memory': StoryTheme.family,
+  'mother-cooking': StoryTheme.family,
+  'first-bike': StoryTheme.childhood,
+  'rain-trouble': StoryTheme.repairs,
+  'tool-favourite': StoryTheme.repairs,
+  'son-childhood': StoryTheme.family,
+  'lesson-life': StoryTheme.life,
+  'colleagues-together': StoryTheme.people,
+  'retirement-day': StoryTheme.tnstc,
+  'village-temple': StoryTheme.childhood,
+  'fix-at-home': StoryTheme.repairs,
+  'long-route': StoryTheme.tnstc,
+  'advice-grandchild': StoryTheme.life,
+  'first-film': StoryTheme.childhood,
+  'safety-rule': StoryTheme.repairs,
+  'amma-first-meet': StoryTheme.family,
+  'change-seen': StoryTheme.life,
+};
+
+/// Follow-up questions use the id `followup:STORY:FOLLOWUP` and take
+/// their theme from the story they follow, which [themeOfPrompt] resolves via
+/// [parentPromptId].
+StoryTheme themeOfPrompt(String promptId, {String? parentPromptId}) {
+  final id = promptId.startsWith('followup:')
+      ? (parentPromptId ?? '')
+      : promptId;
+  return _promptThemes[id] ?? StoryTheme.life;
+}

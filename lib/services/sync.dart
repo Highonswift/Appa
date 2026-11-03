@@ -91,6 +91,45 @@ abstract class FamilySync {
     required String questionId,
     required String localPath,
   });
+
+  // ---------------------------------------------------------- Phase 3
+
+  /// Family: a follow-up question about one of his stories.
+  Future<void> addFollowUp({
+    required String id,
+    required String storyId,
+    required String text,
+    required String authorName,
+  });
+
+  /// Appa: follow-ups not yet asked.
+  Future<List<StoryFollowUp>> fetchFollowUps();
+  Future<void> markFollowUpUsed(String id, String day);
+
+  /// Appa: the story's written-out text, for the family's archive.
+  Future<void> setTranscript(String storyId, String transcript);
+
+  /// Appa: a short pattern note he agreed to send (never a transcript).
+  Future<void> sendAlert({
+    required String id,
+    required String kind,
+    required String note,
+  });
+
+  /// Family: notes not yet acknowledged.
+  Future<List<FamilyAlert>> fetchAlerts();
+  Future<void> ackAlert(String id);
+}
+
+class FamilyAlert {
+  const FamilyAlert({
+    required this.id,
+    required this.note,
+    required this.createdAt,
+  });
+  final String id;
+  final String note;
+  final DateTime createdAt;
 }
 
 class RemoteStory {
@@ -100,12 +139,14 @@ class RemoteStory {
     required this.audioPath,
     required this.createdAt,
     required this.replyAuthors,
+    this.transcript,
   });
   final String id;
   final String promptText;
   final String audioPath;
   final DateTime createdAt;
   final List<String> replyAuthors;
+  final String? transcript;
 }
 
 class RemoteReply {
@@ -264,7 +305,9 @@ class SupabaseFamilySync implements FamilySync {
   Future<List<RemoteStory>> fetchStories() async {
     final rows = await _c
         .from('stories')
-        .select('id, prompt_text, audio_path, created_at, replies(author_name)')
+        .select(
+          'id, prompt_text, audio_path, created_at, transcript, replies(author_name)',
+        )
         .eq('household_id', _hh)
         .order('created_at', ascending: false);
     return [
@@ -278,6 +321,7 @@ class SupabaseFamilySync implements FamilySync {
             for (final rep in (r['replies'] as List? ?? []))
               (rep as Map)['author_name'] as String? ?? '',
           ],
+          transcript: r['transcript'] as String?,
         ),
     ];
   }
@@ -572,6 +616,96 @@ class SupabaseFamilySync implements FamilySync {
         .eq('id', questionId);
     return path;
   }
+  // ---------------------------------------------------------- Phase 3
+
+  @override
+  Future<void> addFollowUp({
+    required String id,
+    required String storyId,
+    required String text,
+    required String authorName,
+  }) async {
+    await _c.from('story_followups').insert({
+      'id': id,
+      'household_id': _hh,
+      'story_id': storyId,
+      'text': text,
+      'author_name': authorName,
+    });
+  }
+
+  @override
+  Future<List<StoryFollowUp>> fetchFollowUps() async {
+    final rows = await _c
+        .from('story_followups')
+        .select('id, story_id, text, author_name, created_at, used_on')
+        .eq('household_id', _hh)
+        .order('created_at');
+    return [
+      for (final r in rows)
+        StoryFollowUp(
+          id: r['id'] as String,
+          storyId: r['story_id'] as String,
+          text: r['text'] as String? ?? '',
+          authorName: r['author_name'] as String? ?? '',
+          createdAt: DateTime.parse(r['created_at'] as String).toLocal(),
+          usedOnDay: r['used_on'] as String?,
+        ),
+    ];
+  }
+
+  @override
+  Future<void> markFollowUpUsed(String id, String day) async {
+    await _c.from('story_followups').update({'used_on': day}).eq('id', id);
+  }
+
+  @override
+  Future<void> setTranscript(String storyId, String transcript) async {
+    await _c
+        .from('stories')
+        .update({'transcript': transcript})
+        .eq('id', storyId);
+  }
+
+  @override
+  Future<void> sendAlert({
+    required String id,
+    required String kind,
+    required String note,
+  }) async {
+    await _c.from('alerts').upsert({
+      'id': id,
+      'household_id': _hh,
+      'kind': kind,
+      'note': note,
+    });
+  }
+
+  @override
+  Future<List<FamilyAlert>> fetchAlerts() async {
+    final rows = await _c
+        .from('alerts')
+        .select('id, note, created_at')
+        .eq('household_id', _hh)
+        .isFilter('acknowledged_at', null)
+        .order('created_at', ascending: false);
+    return [
+      for (final r in rows)
+        FamilyAlert(
+          id: r['id'] as String,
+          note: r['note'] as String? ?? '',
+          createdAt: DateTime.parse(r['created_at'] as String).toLocal(),
+        ),
+    ];
+  }
+
+  @override
+  Future<void> ackAlert(String id) async {
+    await _c
+        .from('alerts')
+        .update({'acknowledged_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', id);
+  }
 }
 
 /// Used when sync is not set up. Every remote call is a quiet no-op.
@@ -658,4 +792,27 @@ class NoFamilySync implements FamilySync {
     required String questionId,
     required String localPath,
   }) => throw UnsupportedError('no sync');
+  @override
+  Future<void> addFollowUp({
+    required String id,
+    required String storyId,
+    required String text,
+    required String authorName,
+  }) => throw UnsupportedError('no sync');
+  @override
+  Future<List<StoryFollowUp>> fetchFollowUps() async => [];
+  @override
+  Future<void> markFollowUpUsed(String id, String day) async {}
+  @override
+  Future<void> setTranscript(String storyId, String transcript) async {}
+  @override
+  Future<void> sendAlert({
+    required String id,
+    required String kind,
+    required String note,
+  }) => throw UnsupportedError('no sync');
+  @override
+  Future<List<FamilyAlert>> fetchAlerts() async => [];
+  @override
+  Future<void> ackAlert(String id) async {}
 }

@@ -1,4 +1,4 @@
-# Appa App — Phases 1 and 2
+# Appa App — Phases 1, 2 and 3
 
 A Tamil-first, voice-first Android app for Appa, built from the
 [product roadmap](https://claude.ai/artifact/B9DWTfLX9QfvY3wMPEGWxP). It is a bridge to
@@ -28,8 +28,18 @@ people, not a replacement for them: every feature ends with Appa talking to some
 The family phone now has four tabs: stories, questions, Appa's day (only what he shares, plus one
 request a day) and settings.
 
-Still left out, per the roadmap: the companion chatbot, pattern alerts, gamification, his own bank's
-app and pension-portal walkthroughs (need his real details first), and dish photos.
+**Phase 3 — connection and companion:**
+
+| Feature | What it does |
+|---|---|
+| Call someone today, extended | Contacts now have a group (family, relative, depot/work friend, friend, neighbour) and an optional birthday. After a call he is asked once "நன்றாக இருந்ததா?" (good / okay / not good, or skip); good calls lift that person in the daily suggestion, not-good ones lower them. Birthdays and festivals show the day before and on the day, with people to call — on his home screen, not as extra notifications. |
+| Story archive | Stories grouped by theme (childhood and village, TNSTC years, repairs, colleagues, family, life lessons) with progress towards 40. Family can ask a follow-up about any story (from their phone, or on his) and it becomes the *next* day's question. Stories can be written out (transcribed) and the whole archive exported as one zip — every recording plus a text file — to give to the grandchildren. |
+| Tamil voice companion | "பேசலாம்": he speaks, it listens and reflects in plain Tamil. Enforced by the app, not just asked of the model: an outward suggestion (call a person / tomorrow's story / today's plan) by every third reply; a soft 15-minute limit (he can set 5/10/15) that wraps up and points to a real activity; any affection, friendship or "I miss you" sentence is removed; health, money and family conflict always get "talk to the doctor / Ragul" and a call button, never advice. Conversations are not saved anywhere; only session length, whether it ended outward, and facts he can read and delete on "நீங்கள் சொன்னவை". |
+| Pattern surfacing, with his consent | Four bad nights in a row, three companion sessions in a week with "unwanted/angry", or a week without a call: the app tells him first and asks "shall I tell Ragul?". Yes sends one short sentence (never a transcript); no is respected and not asked again that week. He can set "always tell" per pattern himself. |
+| Weekly review, extended | Archive count, companion sessions, average length this week vs last, share ending in an outward action, whether he changed a setting himself, and a stop-and-rethink warning if sessions are getting longer. |
+
+Still left out: his own bank's app and pension-portal walkthroughs (need his real details first),
+dish photos, and push notifications to the family (pattern notes appear when they open the app).
 
 ## Tech stack (all free)
 
@@ -45,8 +55,11 @@ app and pension-portal walkthroughs (need his real details first), and dish phot
 | Tamil voice in | `speech_to_text` → the phone's own Google speech recogniser | Free, no API key (daily plan dictation) |
 | Forwarding | `share_plus` → the phone's share sheet | He picks WhatsApp/SMS and the people |
 | Charts | Hand-drawn `CustomPainter`, colour-blind-safe palette | No chart library needed |
+| Companion + transcripts | Google Gemini API, free tier (`gemini-2.5-flash` by default), plain REST via `http`, behind a swappable `CompanionModel` interface | Free; good Tamil. **Trade-off chosen by the family:** on the free tier Google may use the requests to improve its products. Turning on billing for the same key stops that; Claude or an on-device model can be plugged in by implementing one class. |
+| Archive export | `archive` (zip) + the share sheet | |
 
-No analytics SDKs, no ad SDKs, no trackers, and no LLM. Walkthroughs are
+No analytics SDKs, no ad SDKs, no trackers. The only model calls are the companion and story
+transcription, and only after the family enters a Gemini key. Walkthroughs are
 scripted (`lib/logic/walkthrough.dart`), so they are deterministic and never confidently wrong.
 
 ## Run it on a phone
@@ -57,7 +70,7 @@ and Android Studio (for the Android SDK). Both are free.
 ```bash
 cd /Users/ragulkts/Highonswift/Appa
 flutter pub get
-flutter test                 # 52 tests
+flutter test                 # 84 tests
 flutter run                  # with Appa's phone plugged in, USB debugging on
 flutter build apk --release  # APK at build/app/outputs/flutter-apk/app-release.apk
 ```
@@ -74,7 +87,10 @@ family phones by hand. Create a real signing key before any Play Store upload.
    *குரலைச் சோதி* button to test it.
 4. In **குடும்பத்தினருக்கு: அமைப்புகள்** (settings), add his five people from Phase 0
    (name, number, relation) and set the reminder times and medicine name.
-5. Sit with him for the first use.
+5. For the companion and transcripts (optional): get a free key at
+   [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and paste it in settings under
+   **பேசும் வசதி (Gemini, இலவசம்)**. Without a key the "பேசலாம்" tile stays hidden.
+6. Sit with him for the first use, and for his first companion conversation.
 
 ### Family sync (optional, free)
 
@@ -83,7 +99,8 @@ his phone during a visit. To let family listen and reply from their own phones:
 
 1. Create a free project at [supabase.com](https://supabase.com).
 2. In the dashboard: **SQL Editor → New query →** paste `supabase/schema.sql` **→ Run**, then
-   the same for `supabase/migrations/002_phase2.sql` (already set up for Phase 1? run only this one).
+   the same for `supabase/migrations/002_phase2.sql` and `003_phase3.sql`, in order (already set up
+   earlier? run only the ones you haven't).
 3. **Authentication → Sign In / Providers →** turn on **Allow anonymous sign-ins**.
 4. **Project Settings → API**: copy the Project URL and the publishable (anon) key.
 5. On Appa's phone: settings → paste both → **பகிர்தலைத் தொடங்கு** (start sharing). It shows a
@@ -112,12 +129,19 @@ lib/
   data/walkthroughs.dart    the 10 walkthrough scripts, in display order
   data/scam_stories.dart    12 scam-pattern stories
   data/dish_glossary.dart   18 menu dishes explained in Tamil
+  data/festivals.dart       festival dates for greeting nudges (lunar ones: verify yearly)
+  logic/phase3.dart         tuned call choice, occasions, follow-ups, patterns, reply filter, stats (pure)
+  logic/companion.dart      the companion's agent layer: system prompt + enforced rules
+  logic/archive_export.dart story archive zip (audio + transcript text)
+  services/companion_model.dart  CompanionModel interface, Gemini REST implementation, fake
   services/                 speech, dictation + sharing, audio, reminders, phone, sync (each with a fake)
   widgets/health_chart.dart two-series line chart with legend, end labels, tap-to-read
   screens/                  setup, home, story, questions, call, plan, walkthrough, scam,
-                            routine, health, sharing (+ weekly review), settings, family (tabs)
+                            routine, health, sharing (+ weekly review), settings, family (tabs),
+                            companion (+ memory), archive
 supabase/schema.sql         Phase 1 tables, RPCs, row-level security, private voice bucket
 supabase/migrations/        002_phase2.sql: questions, plan, health, sleep, sharing + consent RLS
+                            003_phase3.sql: story follow-ups, transcripts, pattern alerts
 test/                       unit tests (logic) + widget tests (screens)
 ```
 
@@ -135,7 +159,16 @@ test/                       unit tests (logic) + widget tests (screens)
   ranking Appa gives at the week-3 review. Refresh `scam_stories.dart` with what is circulating locally.
 - **Ragul and Amma's commitment.** At least two real questions a week on the question board
   before it ships to him, or he will notice it is empty.
-- **Exit criteria (from the roadmap).** Phase 1: used on 10 of 14 days unprompted, at least 5 stories,
+- **Companion, before he uses it.** Have Ragul and the team talk to it for a week first, in Tamil,
+  trying to make it advise on medicine or money and trying to make it say it misses them. Check
+  that transcription accepts the `.m4a` recordings (sent as `audio/mp4`).
+- **Festival dates.** Lunar festivals in `lib/data/festivals.dart` are approximate; check them
+  against a panchangam and add next year's.
+- **Exit criteria (from the roadmap).** Phase 3: 40+ stories in the archive; companion sessions
+  average under 15 minutes and at least a third end in a call, story or plan; he has changed a
+  companion setting himself. Stop and rethink if sessions lengthen week over week, if he prefers it
+  to calling people, or if Amma says it adds friction.
+- **Earlier exit criteria.** Phase 1: used on 10 of 14 days unprompted, at least 5 stories,
   at least 3 calls from the nudge, at least 10 complaints. Phase 2: at least 4 walkthroughs and one
   real thing done without help, 6 family questions answered, a visible sleep trend, and Amma's
   word on whether the daily plan reduces friction. The weekly review screen tracks these.

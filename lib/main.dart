@@ -42,6 +42,11 @@ Future<void> main() async {
   }
   state.speaker.init();
   state.resumeSync();
+  if (state.role == DeviceRole.appa) {
+    // Phase 3: today's follow-up question and any pattern to raise with him.
+    await state.ensureTodaysFollowUp();
+    await state.checkPatterns();
+  }
 
   runApp(AppaApp(state: state));
 

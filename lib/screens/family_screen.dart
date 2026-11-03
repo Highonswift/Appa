@@ -61,13 +61,45 @@ class _FamilyHomeScreenState extends State<FamilyHomeScreen> {
         ],
       );
     } else {
-      body = RefreshIndicator(
-        onRefresh: _refresh,
-        child: switch (tab) {
-          0 => const _StoriesTab(),
-          1 => const _AskTab(),
-          _ => const _DayTab(),
-        },
+      body = Column(
+        children: [
+          for (final a in s.familyAlerts)
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.accentSoft,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.accent),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.favorite, color: AppColors.accent, size: 30),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      a.note,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => s.ackFamilyAlert(a.id),
+                    child: const Text('சரி'),
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _refresh,
+              child: switch (tab) {
+                0 => const _StoriesTab(),
+                1 => const _AskTab(),
+                _ => const _DayTab(),
+              },
+            ),
+          ),
+        ],
       );
     }
 
@@ -431,6 +463,19 @@ class _FamilyStoryScreenState extends State<FamilyStoryScreen> {
             icon: const Icon(Icons.play_arrow_rounded, size: 38),
             label: const Text('அப்பாவின் கதையைக் கேளுங்கள்'),
           ),
+          if (widget.story.transcript != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(widget.story.transcript!, style: t.bodyLarge),
+            ),
+          ],
+          const SizedBox(height: 24),
+          _FollowUpAsk(storyId: widget.story.id),
           const SizedBox(height: 32),
           Text('குரல் பதில்', style: t.titleLarge),
           const SizedBox(height: 6),
@@ -473,6 +518,70 @@ class _FamilyStoryScreenState extends State<FamilyStoryScreen> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// A follow-up question about this story; it becomes his question on a
+/// later day (roadmap: "Family can ask follow-up questions, which generate
+/// the next day's prompt").
+class _FollowUpAsk extends StatefulWidget {
+  const _FollowUpAsk({required this.storyId});
+  final String storyId;
+  @override
+  State<_FollowUpAsk> createState() => _FollowUpAskState();
+}
+
+class _FollowUpAskState extends State<_FollowUpAsk> {
+  final text = TextEditingController();
+  String? note;
+
+  @override
+  void dispose() {
+    text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('இதைப் பற்றி இன்னும் கேட்க', style: t.titleLarge),
+        const SizedBox(height: 6),
+        Text(
+          'நாளைய கதைக் கேள்வியாக அவருக்கு வரும்.',
+          style: t.bodyMedium?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: text,
+          decoration: const InputDecoration(
+            labelText: 'உதா: அந்த நண்பர் இப்போது எங்கே இருக்கிறார்?',
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: () async {
+            if (text.text.trim().isEmpty) return;
+            final ok = await context.read<AppState>().askFollowUp(
+              storyId: widget.storyId,
+              text: text.text,
+            );
+            setState(() {
+              note = ok ? 'அனுப்பப்பட்டது.' : 'அனுப்ப முடியவில்லை.';
+              if (ok) text.clear();
+            });
+          },
+          child: const Text('கேள்'),
+        ),
+        if (note != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(note!, style: t.bodyMedium),
+          ),
+      ],
     );
   }
 }

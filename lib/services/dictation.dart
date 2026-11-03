@@ -81,6 +81,9 @@ class FakeDictation implements Dictation {
 /// Opens the phone's share sheet (WhatsApp, SMS, ...). He chooses who.
 abstract class Sharer {
   Future<bool> shareText(String text);
+
+  /// Shares files (the story archive zip) with a short message.
+  Future<bool> shareFiles(List<String> paths, String text);
 }
 
 class DeviceSharer implements Sharer {
@@ -94,10 +97,32 @@ class DeviceSharer implements Sharer {
       return false;
     }
   }
+
+  @override
+  Future<bool> shareFiles(List<String> paths, String text) async {
+    try {
+      final r = await SharePlus.instance.share(
+        ShareParams(text: text, files: [for (final p in paths) XFile(p)]),
+      );
+      return r.status != ShareResultStatus.dismissed;
+    } catch (e) {
+      debugPrint('Share failed: $e');
+      return false;
+    }
+  }
 }
 
 class FakeSharer implements Sharer {
   final List<String> shared = [];
+  final List<List<String>> files = [];
+
+  @override
+  Future<bool> shareFiles(List<String> paths, String text) async {
+    files.add(paths);
+    shared.add(text);
+    return true;
+  }
+
   @override
   Future<bool> shareText(String text) async {
     shared.add(text);

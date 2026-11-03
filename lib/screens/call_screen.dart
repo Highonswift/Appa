@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../models/models.dart';
 import '../theme.dart';
+import '../logic/phase3.dart';
 import '../widgets/common.dart';
 
 /// Call someone today: one person a day, one tap to call, "not today"
@@ -124,6 +125,11 @@ class _CallScreenState extends State<CallScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const CallRatingCard(),
+          for (final o in s.occasions) ...[
+            OccasionCard(occasion: o),
+            const SizedBox(height: 16),
+          ],
           main,
           if (s.contacts.isNotEmpty) ...[
             const SizedBox(height: 32),
@@ -153,6 +159,134 @@ class _CallScreenState extends State<CallScreen> {
                           : '${c.name}  ·  ${c.relation}',
                     ),
                   ),
+                ),
+              ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// After a call: "Good call?" — one tap, or skip. Tunes who comes next.
+class CallRatingCard extends StatefulWidget {
+  const CallRatingCard({super.key});
+  @override
+  State<CallRatingCard> createState() => _CallRatingCardState();
+}
+
+class _CallRatingCardState extends State<CallRatingCard> {
+  bool skipped = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final t = Theme.of(context).textTheme;
+    final call = s.unratedCall;
+    if (call == null || skipped) return const SizedBox.shrink();
+    final who = s.contactById(call.contactId)?.name ?? '';
+
+    Widget choice(String label, CallRating r, Color color) => Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: FilledButton(
+          onPressed: () => s.rateCall(r),
+          style: FilledButton.styleFrom(
+            backgroundColor: color,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          child: Text(label, textAlign: TextAlign.center),
+        ),
+      ),
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.callGreen, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('$who-உடன் பேசியது நன்றாக இருந்ததா?', style: t.titleLarge),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              choice('நன்றாக', CallRating.good, AppColors.callGreen),
+              choice('பரவாயில்லை', CallRating.okay, const Color(0xFFB8860B)),
+              choice('சரியில்லை', CallRating.notGood, AppColors.accent),
+            ],
+          ),
+          TextButton(
+            onPressed: () => setState(() => skipped = true),
+            child: const Text('சொல்ல வேண்டாம்'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A birthday or festival today or tomorrow, with people to call.
+class OccasionCard extends StatelessWidget {
+  const OccasionCard({super.key, required this.occasion});
+  final Occasion occasion;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.read<AppState>();
+    final t = Theme.of(context).textTheme;
+    final people = occasion.kind == OccasionKind.birthday
+        ? [occasion.contact!]
+        : occasion.suggested;
+    final greeting = occasion.kind == OccasionKind.birthday
+        ? 'பிறந்தநாள் வாழ்த்துகள்'
+        : occasion.festival?.greeting ?? '';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.accentSoft,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                occasion.kind == OccasionKind.birthday
+                    ? Icons.cake
+                    : Icons.celebration,
+                size: 34,
+                color: AppColors.accent,
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(occasion.line, style: t.titleLarge)),
+            ],
+          ),
+          if (people.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              occasion.daysAway == 0
+                  ? 'இன்று அழைத்து "$greeting" சொல்லலாம்.'
+                  : 'நாளை அழைத்து "$greeting" சொல்ல மறக்க வேண்டாம்.',
+              style: t.bodyLarge,
+            ),
+            if (occasion.daysAway == 0)
+              for (final c in people) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => s.callContact(c),
+                  icon: const Icon(
+                    Icons.call,
+                    color: AppColors.callGreen,
+                    size: 28,
+                  ),
+                  label: Text('${c.name}-ஐ அழை'),
                 ),
               ],
           ],
