@@ -212,6 +212,20 @@ class ReviewScreen extends StatelessWidget {
             '${r.questionsAnswered} / ${r.questionsWaiting}',
           ),
           row('கதைத் தொகுப்பு (இலக்கு 40)', '${s.stories.length}'),
+          row(
+            'வெளியாட்களுக்குப் பதில் (இலக்கு 5)',
+            '${s.purpose.outsideAnswered}',
+          ),
+          row('போன நிகழ்ச்சிகள் (இலக்கு 2)', '${s.purpose.eventsAttended}'),
+          row(
+            'சரிசெய்தவை (இந்த மாதம் / மொத்தம்)',
+            '${s.purpose.repairsThisMonth} / ${s.purpose.repairsTotal}',
+          ),
+          if (s.ledgerEnabled)
+            row(
+              'கணக்குப் பதிவுகள் (இந்த மாதம்)',
+              '${s.purpose.ledgerEntriesThisMonth}',
+            ),
           if (s.companionModel.configured) ...[
             row(
               'பேசும் வசதி: இந்த வாரம்',

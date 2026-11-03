@@ -11,6 +11,7 @@ import 'logic/archive_export.dart';
 import 'logic/companion.dart';
 import 'logic/phase2.dart';
 import 'logic/phase3.dart';
+import 'logic/phase4.dart';
 import 'models/models.dart';
 import 'services/audio.dart';
 import 'services/companion_model.dart';
@@ -75,6 +76,10 @@ class AppState extends ChangeNotifier {
   late List<CompanionSessionLog> sessions;
   late CompanionSettings companionSettings;
   late List<PatternAlert> alerts;
+  late List<RepairEntry> repairs;
+  late List<LedgerEntry> ledger;
+  late bool ledgerEnabled;
+  late List<LocalEvent> events;
   late AlertPermissions alertPermissions;
   DateTime? firstUse;
 
@@ -105,6 +110,10 @@ class AppState extends ChangeNotifier {
     alerts = store.alerts;
     alertPermissions = store.alertPermissions;
     firstUse = store.firstUse;
+    repairs = store.repairs..sort((a, b) => b.at.compareTo(a.at));
+    ledger = store.ledger;
+    ledgerEnabled = store.ledgerEnabled;
+    events = store.events;
     _buildModel();
   }
 
@@ -351,6 +360,7 @@ class AppState extends ChangeNotifier {
   /// Reconnect on start if sync was set up before. Never blocks the app.
   Future<void> resumeSync() async {
     final url = store.syncUrl, key = store.syncKey, code = store.householdCode;
+    if (role == DeviceRole.friend) return _resumeFriend();
     if (url == null || key == null || code == null) return;
     try {
       await sync.connect(url: url, key: key);
@@ -360,6 +370,7 @@ class AppState extends ChangeNotifier {
         await pullReplies();
         await pullPhase2();
         await pullPhase3();
+        await pullPhase4();
       } else {
         await loadFamilyExtras();
       }
@@ -1232,4 +1243,367 @@ class AppState extends ChangeNotifier {
       return false;
     }
   }
+
+  // ================================================================ Phase 4
+
+  // ---------------------------------------------------------------- repair diary
+
+  Future<void> addRepair({
+    required String item,
+    String note = '',
+    String? photoPath,
+    String? audioPath,
+    String? forWhom,
+  }) async {
+    if (item.trim().isEmpty) return;
+    repairs = [
+      RepairEntry(
+        id: _uuid.v4(),
+        at: now,
+        item: item.trim(),
+        note: note.trim(),
+        photoPath: photoPath,
+        audioPath: audioPath,
+        forWhom: (forWhom ?? '').trim().isEmpty ? null : forWhom!.trim(),
+      ),
+      ...repairs,
+    ];
+    await store.saveRepairs(repairs);
+    notifyListeners();
+  }
+
+  Future<void> removeRepair(String id) async {
+    repairs = repairs.where((r) => r.id != id).toList();
+    await store.saveRepairs(repairs);
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------- household ledger
+
+  Future<void> setLedgerEnabled(bool v) async {
+    ledgerEnabled = v;
+    await store.setLedgerEnabled(v);
+    notifyListeners();
+  }
+
+  Future<void> addLedger(String item, int amount) async {
+    if (item.trim().isEmpty || amount <= 0) return;
+    ledger = [
+      ...ledger,
+      LedgerEntry(id: _uuid.v4(), at: now, item: item.trim(), amount: amount),
+    ];
+    await store.saveLedger(ledger);
+    notifyListeners();
+  }
+
+  /// "காய்கறி 200" said or typed. Returns a gentle message if unclear.
+  Future<String?> addLedgerSpoken(String text) async {
+    final p = parseLedgerUtterance(text);
+    if (p == null) {
+      return 'எதற்கு, எவ்வளவு என்று சொல்லுங்கள். உதாரணமாக: காய்கறி 200.';
+    }
+    await addLedger(p.item, p.amount);
+    return null;
+  }
+
+  Future<void> removeLedger(String id) async {
+    ledger = ledger.where((e) => e.id != id).toList();
+    await store.saveLedger(ledger);
+    notifyListeners();
+  }
+
+  MonthLedger ledgerMonth(int year, int month) =>
+      ledgerForMonth(ledger, year, month);
+
+  // ---------------------------------------------------------------- local events
+
+  List<LocalEvent> get upcoming => upcomingEvents(events, now);
+  List<LocalEvent> get askAttended =>
+      eventsToAskAbout(events, now, answered: store.eventsAnswered);
+
+  /// Family adding an event on his phone.
+  Future<void> addEventLocal({
+    required String title,
+    required String place,
+    required DateTime startsAt,
+    String note = '',
+    String addedBy = '',
+  }) async {
+    final e = LocalEvent(
+      id: _uuid.v4(),
+      title: title.trim(),
+      place: place.trim(),
+      startsAt: startsAt,
+      note: note.trim(),
+      addedBy: addedBy.trim(),
+    );
+    events = [...events, e];
+    await store.saveEvents(events);
+    notifyListeners();
+  }
+
+  Future<void> markAttended(String id, bool attended) async {
+    events = [
+      for (final e in events) e.id == id ? e.copyWith(attended: attended) : e,
+    ];
+    await store.saveEvents(events);
+    await store.saveEventsAnswered({...store.eventsAnswered, id});
+    notifyListeners();
+    if (sync.connected && role == DeviceRole.appa) {
+      try {
+        await sync.setEventAttended(id, attended);
+      } catch (e) {
+        syncError = '$e';
+      }
+    }
+  }
+
+  /// One tap: into his plan for that day.
+  Future<void> eventToPlan(LocalEvent e) =>
+      addPlanItem('${e.title} — ${e.place}', day: dayKey(e.startsAt));
+
+  /// One tap: invite a friend (he picks who in the share sheet).
+  Future<bool> inviteToEvent(LocalEvent e) =>
+      sharer.shareText(eventInvite(e, displayName));
+
+  /// Appa's phone: bring in family-curated events and the circle.
+  Future<void> pullPhase4() async {
+    if (role != DeviceRole.appa) return;
+    try {
+      if (sync.connected) {
+        final remote = await sync.fetchEvents();
+        final local = {for (final e in events) e.id: e};
+        events = [
+          for (final r in remote)
+            local[r.id]?.attended == true ? r.copyWith(attended: true) : r,
+          ...events.where((e) => !remote.any((r) => r.id == e.id)),
+        ];
+        await store.saveEvents(events);
+      }
+      if (store.circleId != null) {
+        sync.useCircle(store.circleId!);
+        await loadCircle();
+      }
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  /// Family phone: add an event for Appa.
+  Future<bool> addFamilyEvent({
+    required String title,
+    required String place,
+    required DateTime startsAt,
+    String note = '',
+  }) async {
+    try {
+      await sync.addEvent(
+        LocalEvent(
+          id: _uuid.v4(),
+          title: title.trim(),
+          place: place.trim(),
+          startsAt: startsAt,
+          note: note.trim(),
+          addedBy: displayName,
+        ),
+      );
+      return true;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------- help others
+
+  String? get helpCode => store.helpCode;
+
+  int get unansweredOutside =>
+      questions.where((q) => q.outside && !q.answered).length;
+
+  /// Appa's phone: make (once) and share the help code with his words.
+  Future<String?> ensureHelpCode() async {
+    if (store.helpCode != null) return store.helpCode;
+    if (!sync.connected || role != DeviceRole.appa) return null;
+    try {
+      final c = await sync.helpCode();
+      await store.saveHelpCode(c);
+      notifyListeners();
+      return c;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> shareHelpCode() async {
+    final code = await ensureHelpCode();
+    if (code == null) return false;
+    return sharer.shareText(
+      'வண்டி, வீட்டுப் பழுது, மின்சாரம், அரசு அலுவலகம், ஓய்வூதியம் பற்றி ஏதாவது கேட்க வேண்டுமா? '
+      '"அப்பா" ஆப்பில் "நண்பர்" என்று தேர்ந்தெடுத்து, இந்தக் குறியீட்டைப் போடுங்கள்: $code\n— $displayName',
+    );
+  }
+
+  // ---------------------------------------------------------------- friend phone
+
+  bool get helpJoined => store.helpJoined;
+  bool get inCircle => store.circleId != null;
+  List<FamilyQuestion> friendQuestions = [];
+
+  Future<void> _resumeFriend() async {
+    final url = store.syncUrl, key = store.syncKey;
+    if (url == null || key == null) return;
+    try {
+      await sync.connect(url: url, key: key);
+      if (store.helpJoined) {
+        await sync.resume(householdCode: store.householdCode ?? '');
+        friendQuestions = await sync.fetchQuestions();
+      }
+      if (store.circleId != null) {
+        sync.useCircle(store.circleId!);
+        await loadCircle();
+      }
+      syncError = null;
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  /// Friend phone (or Appa/family for a circle code): join with a code.
+  Future<String?> joinWithCode({
+    required String url,
+    required String key,
+    required String code,
+  }) async {
+    syncing = true;
+    notifyListeners();
+    try {
+      await sync.connect(url: url.trim(), key: key.trim());
+      final r = await sync.joinByCode(code: code, displayName: displayName);
+      if (r.kind == 'circle') {
+        await store.saveCircle(id: r.id, code: code.trim().toUpperCase());
+        await store.saveSync(
+          url: url.trim(),
+          key: key.trim(),
+          householdCode: store.householdCode,
+        );
+        await loadCircle();
+      } else {
+        await store.setHelpJoined(true);
+        await store.saveSync(
+          url: url.trim(),
+          key: key.trim(),
+          householdCode: code.trim().toUpperCase(),
+        );
+        friendQuestions = await sync.fetchQuestions();
+      }
+      syncError = null;
+      return r.kind;
+    } catch (e) {
+      syncError = '$e';
+      return null;
+    } finally {
+      syncing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> askHelp({
+    String? text,
+    String? audioPath,
+    required String topic,
+  }) async {
+    try {
+      await sync.askQuestion(
+        id: _uuid.v4(),
+        text: text,
+        localAudioPath: audioPath,
+        authorName: displayName,
+        outside: true,
+        topic: topic,
+      );
+      friendQuestions = await sync.fetchQuestions();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------- retirees circle
+
+  List<CircleMember> circleMembers = [];
+  List<CircleAnswer> circleAnswers = [];
+
+  String get thisWeek => weekKey(now);
+  String get circlePrompt => circlePromptFor(now);
+  bool get answeredCircleThisWeek =>
+      circleAnswers.any((a) => a.mine && a.week == thisWeek);
+
+  Future<String?> createCircle(String name) async {
+    try {
+      final r = await sync.createCircle(
+        name: name.trim(),
+        displayName: displayName,
+      );
+      await store.saveCircle(id: r.id, code: r.code);
+      await loadCircle();
+      return r.code;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> loadCircle() async {
+    if (store.circleId == null || !sync.online) return;
+    try {
+      circleMembers = await sync.fetchCircleMembers();
+      circleAnswers = await sync.fetchCircleAnswers();
+    } catch (e) {
+      syncError = '$e';
+    }
+    notifyListeners();
+  }
+
+  Future<bool> answerCircle(String audioPath) async {
+    try {
+      await sync.uploadCircleAnswer(
+        week: thisWeek,
+        localPath: audioPath,
+        authorName: displayName,
+      );
+      await loadCircle();
+      return true;
+    } catch (e) {
+      syncError = '$e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> shareCircleCode() async {
+    final code = store.circleCode;
+    if (code == null) return false;
+    return sharer.shareText(
+      'நம் பழைய டிப்போ நண்பர்கள் வட்டம். வாரம் ஒரு கேள்வி, எல்லோரும் குரலில் பதில் சொல்லலாம். '
+      '"அப்பா" ஆப்பில் "நண்பர்" என்று தேர்ந்தெடுத்து, இந்தக் குறியீட்டைப் போடுங்கள்: $code\n— $displayName',
+    );
+  }
+
+  PurposeReview get purpose => purposeReview(
+    now: now,
+    questions: questions,
+    events: events,
+    repairs: repairs,
+    ledger: ledger,
+  );
 }

@@ -1,4 +1,4 @@
-# Appa App — Phases 1, 2 and 3
+# Appa App — Phases 1 to 4
 
 A Tamil-first, voice-first Android app for Appa, built from the
 [product roadmap](https://claude.ai/artifact/B9DWTfLX9QfvY3wMPEGWxP). It is a bridge to
@@ -38,8 +38,21 @@ request a day) and settings.
 | Pattern surfacing, with his consent | Four bad nights in a row, three companion sessions in a week with "unwanted/angry", or a week without a call: the app tells him first and asks "shall I tell Ragul?". Yes sends one short sentence (never a transcript); no is respected and not asked again that week. He can set "always tell" per pattern himself. |
 | Weekly review, extended | Archive count, companion sessions, average length this week vs last, share ending in an outward action, whether he changed a setting himself, and a stop-and-rethink warning if sessions are getting longer. |
 
+**Phase 4 — purpose and the wider world:**
+
+| Feature | What it does |
+|---|---|
+| Help others | People outside the family (Ragul's team at first, then an invited circle) ask him about vehicles, house repairs, electrical work, offices and pension paperwork, by text or voice, and hear his voice answer. They join with a separate **help code** (Settings → உதவி கேட்பவர்கள்) on a third phone type, "நண்பர்"; the database lets them see only their own questions and his answers to them — never his stories, health, plan, family or codes. On his phone these appear under the question board in their own section, with the topic. |
+| Repair diary | "நான் சரிசெய்தவை": what he fixed, for whom, with a photo, a voice note and the date. Stays on his phone. |
+| Household ledger | Off until he turns it on himself. He says or types "காய்கறி 200" / "பால் ஐம்பது ரூபாய்"; monthly total, by item, compared with last month. Stays on his phone. |
+| Local groups and events | Family add temple events, association meetings, walking or reading groups (from their phone or his). One tap puts one in his plan, one tap invites a friend; afterwards he's asked once "போனீர்களா?". |
+| TNSTC retirees circle | A private group on his old colleagues' own phones (circle code, same "நண்பர்" phone type): one voice prompt a week that everyone answers, everyone's answers as a shared archive, and birthdays this week. Members see nothing of his family data. |
+
+The weekly review now also tracks the Phase 4 exit criteria: outside questions answered, events attended,
+repair and ledger entries.
+
 Still left out: his own bank's app and pension-portal walkthroughs (need his real details first),
-dish photos, and push notifications to the family (pattern notes appear when they open the app).
+dish photos, and push notifications (family and circle members see new items when they open the app).
 
 ## Tech stack (all free)
 
@@ -70,7 +83,7 @@ and Android Studio (for the Android SDK). Both are free.
 ```bash
 cd /Users/ragulkts/Highonswift/Appa
 flutter pub get
-flutter test                 # 84 tests
+flutter test                 # 101 tests
 flutter run                  # with Appa's phone plugged in, USB debugging on
 flutter build apk --release  # APK at build/app/outputs/flutter-apk/app-release.apk
 ```
@@ -99,8 +112,8 @@ his phone during a visit. To let family listen and reply from their own phones:
 
 1. Create a free project at [supabase.com](https://supabase.com).
 2. In the dashboard: **SQL Editor → New query →** paste `supabase/schema.sql` **→ Run**, then
-   the same for `supabase/migrations/002_phase2.sql` and `003_phase3.sql`, in order (already set up
-   earlier? run only the ones you haven't).
+   the same for `supabase/migrations/002_phase2.sql`, `003_phase3.sql` and `004_phase4.sql`, in
+   order (already set up earlier? run only the ones you haven't).
 3. **Authentication → Sign In / Providers →** turn on **Allow anonymous sign-ins**.
 4. **Project Settings → API**: copy the Project URL and the publishable (anon) key.
 5. On Appa's phone: settings → paste both → **பகிர்தலைத் தொடங்கு** (start sharing). It shows a
@@ -133,15 +146,19 @@ lib/
   logic/phase3.dart         tuned call choice, occasions, follow-ups, patterns, reply filter, stats (pure)
   logic/companion.dart      the companion's agent layer: system prompt + enforced rules
   logic/archive_export.dart story archive zip (audio + transcript text)
+  logic/phase4.dart         spoken ledger parsing, month totals, events, ISO weeks, circle prompts (pure)
   services/companion_model.dart  CompanionModel interface, Gemini REST implementation, fake
   services/                 speech, dictation + sharing, audio, reminders, phone, sync (each with a fake)
   widgets/health_chart.dart two-series line chart with legend, end labels, tap-to-read
   screens/                  setup, home, story, questions, call, plan, walkthrough, scam,
                             routine, health, sharing (+ weekly review), settings, family (tabs),
-                            companion (+ memory), archive
+                            companion (+ memory), archive, diary (repairs, ledger),
+                            world (events, circle, friend phone)
 supabase/schema.sql         Phase 1 tables, RPCs, row-level security, private voice bucket
 supabase/migrations/        002_phase2.sql: questions, plan, health, sleep, sharing + consent RLS
                             003_phase3.sql: story follow-ups, transcripts, pattern alerts
+                            004_phase4.sql: guest role locked out of all family data, help code,
+                            outside questions, events, retirees circle (own tables + bucket)
 test/                       unit tests (logic) + widget tests (screens)
 ```
 
@@ -168,6 +185,11 @@ test/                       unit tests (logic) + widget tests (screens)
   average under 15 minutes and at least a third end in a call, story or plan; he has changed a
   companion setting himself. Stop and rethink if sessions lengthen week over week, if he prefers it
   to calling people, or if Amma says it adds friction.
+- **Phase 4 setup.** Seed the help board truthfully (roadmap: "we have a real question about a
+  truck"); a few real questions a month is enough. Ask two or three old colleagues to install the
+  app as "நண்பர்" and join the circle before telling him about it, so it isn't empty.
+- **Phase 4 exit criteria.** At least five questions answered from outside the immediate family; at
+  least two local events attended through the app; diary or ledger entries he made unprompted.
 - **Earlier exit criteria.** Phase 1: used on 10 of 14 days unprompted, at least 5 stories,
   at least 3 calls from the nudge, at least 10 complaints. Phase 2: at least 4 walkthroughs and one
   real thing done without help, 6 family questions answered, a visible sleep trend, and Amma's

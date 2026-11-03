@@ -15,6 +15,10 @@ import '../models/models.dart';
 /// six-character code shown on Appa's phone.
 abstract class FamilySync {
   bool get connected;
+
+  /// Signed in to the backend (even without a household, e.g. a friend who
+  /// only joined the retirees circle).
+  bool get online;
   String? get householdCode;
 
   Future<void> connect({required String url, required String key});
@@ -85,6 +89,8 @@ abstract class FamilySync {
     String? text,
     String? localAudioPath,
     required String authorName,
+    bool outside = false,
+    String? topic,
   });
   Future<List<FamilyQuestion>> fetchQuestions();
   Future<String> answerQuestion({
@@ -119,6 +125,39 @@ abstract class FamilySync {
   /// Family: notes not yet acknowledged.
   Future<List<FamilyAlert>> fetchAlerts();
   Future<void> ackAlert(String id);
+
+  // ---------------------------------------------------------- Phase 4
+
+  /// Appa: a code that lets outside helpers ask him questions (and nothing
+  /// else). Same code each time once made.
+  Future<String> helpCode();
+
+  /// Any phone: join with a help code or a circle code. Returns which.
+  Future<({String kind, String id})> joinByCode({
+    required String code,
+    required String displayName,
+  });
+
+  /// Events curated by family.
+  Future<void> addEvent(LocalEvent e);
+  Future<List<LocalEvent>> fetchEvents();
+  Future<void> setEventAttended(String id, bool attended);
+
+  /// Retirees circle (not tied to the family household).
+  Future<({String id, String code})> createCircle({
+    required String name,
+    required String displayName,
+  });
+  void useCircle(String circleId);
+  Future<List<CircleMember>> fetchCircleMembers();
+  Future<void> setCircleBirthday(int? month, int? day);
+  Future<List<CircleAnswer>> fetchCircleAnswers();
+  Future<void> uploadCircleAnswer({
+    required String week,
+    required String localPath,
+    required String authorName,
+  });
+  Future<String> circleSignedUrl(String path);
 }
 
 class FamilyAlert {
@@ -175,6 +214,9 @@ class SupabaseFamilySync implements FamilySync {
 
   @override
   bool get connected => _client != null && _householdId != null;
+
+  @override
+  bool get online => _client != null;
 
   @override
   String? get householdCode => _code;
@@ -542,6 +584,8 @@ class SupabaseFamilySync implements FamilySync {
     String? text,
     String? localAudioPath,
     required String authorName,
+    bool outside = false,
+    String? topic,
   }) async {
     String? path;
     if (localAudioPath != null) {
@@ -563,6 +607,8 @@ class SupabaseFamilySync implements FamilySync {
       'author_name': authorName,
       'text': text,
       'audio_path': path,
+      'outside': outside,
+      'topic': topic,
     });
   }
 
@@ -571,7 +617,7 @@ class SupabaseFamilySync implements FamilySync {
     final rows = await _c
         .from('questions')
         .select(
-          'id, author_name, text, audio_path, answer_path, answered_at, created_at',
+          'id, author_name, text, audio_path, answer_path, answered_at, created_at, outside, topic',
         )
         .eq('household_id', _hh)
         .order('created_at', ascending: false);
@@ -587,6 +633,8 @@ class SupabaseFamilySync implements FamilySync {
           answeredAt: r['answered_at'] == null
               ? null
               : DateTime.parse(r['answered_at'] as String).toLocal(),
+          outside: r['outside'] as bool? ?? false,
+          topic: r['topic'] as String?,
         ),
     ];
   }
@@ -706,12 +754,187 @@ class SupabaseFamilySync implements FamilySync {
         .update({'acknowledged_at': DateTime.now().toUtc().toIso8601String()})
         .eq('id', id);
   }
+  // ---------------------------------------------------------- Phase 4
+
+  String? _circleId;
+
+  String get _cid {
+    final c = _circleId;
+    if (c == null) throw StateError('Not in a circle');
+    return c;
+  }
+
+  @override
+  void useCircle(String circleId) => _circleId = circleId;
+
+  @override
+  Future<String> helpCode() async => await _c.rpc('help_code') as String;
+
+  @override
+  Future<({String kind, String id})> joinByCode({
+    required String code,
+    required String displayName,
+  }) async {
+    final res = Map<String, dynamic>.from(
+      await _c.rpc(
+        'join_by_code',
+        params: {
+          'p_code': code.trim().toUpperCase(),
+          'p_display_name': displayName,
+        },
+      ) as Map,
+    );
+    final kind = res['kind'] as String;
+    final id = res['id'] as String;
+    if (kind == 'circle') {
+      _circleId = id;
+    } else {
+      _householdId = id;
+      _code ??= code.trim().toUpperCase();
+    }
+    return (kind: kind, id: id);
+  }
+
+  @override
+  Future<void> addEvent(LocalEvent e) async {
+    await _c.from('events').insert({
+      'id': e.id,
+      'household_id': _hh,
+      'title': e.title,
+      'place': e.place,
+      'starts_at': e.startsAt.toUtc().toIso8601String(),
+      'note': e.note,
+      'added_by': e.addedBy,
+    });
+  }
+
+  @override
+  Future<List<LocalEvent>> fetchEvents() async {
+    final rows = await _c
+        .from('events')
+        .select('id, title, place, starts_at, note, added_by, attended')
+        .eq('household_id', _hh)
+        .order('starts_at');
+    return [
+      for (final r in rows)
+        LocalEvent(
+          id: r['id'] as String,
+          title: r['title'] as String? ?? '',
+          place: r['place'] as String? ?? '',
+          startsAt: DateTime.parse(r['starts_at'] as String).toLocal(),
+          note: r['note'] as String? ?? '',
+          addedBy: r['added_by'] as String? ?? '',
+          attended: r['attended'] as bool? ?? false,
+        ),
+    ];
+  }
+
+  @override
+  Future<void> setEventAttended(String id, bool attended) async {
+    await _c.from('events').update({'attended': attended}).eq('id', id);
+  }
+
+  @override
+  Future<({String id, String code})> createCircle({
+    required String name,
+    required String displayName,
+  }) async {
+    final row = Map<String, dynamic>.from(
+      (await _c.rpc(
+            'create_circle',
+            params: {'p_name': name, 'p_display_name': displayName},
+          ) as List).first
+          as Map,
+    );
+    _circleId = row['circle_id'] as String;
+    return (id: _circleId!, code: row['join_code'] as String);
+  }
+
+  @override
+  Future<List<CircleMember>> fetchCircleMembers() async {
+    final rows = await _c
+        .from('circle_members')
+        .select('display_name, birthday_month, birthday_day')
+        .eq('circle_id', _cid)
+        .order('joined_at');
+    return [
+      for (final r in rows)
+        CircleMember(
+          name: r['display_name'] as String? ?? '',
+          birthdayMonth: r['birthday_month'] as int?,
+          birthdayDay: r['birthday_day'] as int?,
+        ),
+    ];
+  }
+
+  @override
+  Future<void> setCircleBirthday(int? month, int? day) async {
+    await _c
+        .from('circle_members')
+        .update({'birthday_month': month, 'birthday_day': day})
+        .eq('circle_id', _cid)
+        .eq('user_id', _c.auth.currentUser!.id);
+  }
+
+  @override
+  Future<List<CircleAnswer>> fetchCircleAnswers() async {
+    final me = _c.auth.currentUser?.id;
+    final rows = await _c
+        .from('circle_answers')
+        .select('id, week, author_id, author_name, audio_path, created_at')
+        .eq('circle_id', _cid)
+        .order('created_at', ascending: false)
+        .limit(200);
+    return [
+      for (final r in rows)
+        CircleAnswer(
+          id: r['id'] as String,
+          week: r['week'] as String,
+          authorName: r['author_name'] as String? ?? '',
+          audioPath: r['audio_path'] as String,
+          createdAt: DateTime.parse(r['created_at'] as String).toLocal(),
+          mine: r['author_id'] == me,
+        ),
+    ];
+  }
+
+  @override
+  Future<void> uploadCircleAnswer({
+    required String week,
+    required String localPath,
+    required String authorName,
+  }) async {
+    final id = '${DateTime.now().millisecondsSinceEpoch}';
+    final path = '$_cid/$week/$id.m4a';
+    await _c.storage
+        .from('circle')
+        .upload(
+          path,
+          File(localPath),
+          fileOptions: const FileOptions(
+            contentType: 'audio/mp4',
+            upsert: true,
+          ),
+        );
+    await _c.from('circle_answers').insert({
+      'circle_id': _cid,
+      'week': week,
+      'author_name': authorName,
+      'audio_path': path,
+    });
+  }
+
+  @override
+  Future<String> circleSignedUrl(String path) =>
+      _c.storage.from('circle').createSignedUrl(path, 60 * 60);
 }
 
 /// Used when sync is not set up. Every remote call is a quiet no-op.
 class NoFamilySync implements FamilySync {
   @override
   bool get connected => false;
+  @override
+  bool get online => connected;
   @override
   String? get householdCode => null;
   @override
@@ -784,6 +1007,8 @@ class NoFamilySync implements FamilySync {
     String? text,
     String? localAudioPath,
     required String authorName,
+    bool outside = false,
+    String? topic,
   }) => throw UnsupportedError('no sync');
   @override
   Future<List<FamilyQuestion>> fetchQuestions() async => [];
@@ -815,4 +1040,39 @@ class NoFamilySync implements FamilySync {
   Future<List<FamilyAlert>> fetchAlerts() async => [];
   @override
   Future<void> ackAlert(String id) async {}
+  @override
+  Future<String> helpCode() => throw UnsupportedError('no sync');
+  @override
+  Future<({String kind, String id})> joinByCode({
+    required String code,
+    required String displayName,
+  }) => throw UnsupportedError('no sync');
+  @override
+  Future<void> addEvent(LocalEvent e) => throw UnsupportedError('no sync');
+  @override
+  Future<List<LocalEvent>> fetchEvents() async => [];
+  @override
+  Future<void> setEventAttended(String id, bool attended) async {}
+  @override
+  Future<({String id, String code})> createCircle({
+    required String name,
+    required String displayName,
+  }) => throw UnsupportedError('no sync');
+  @override
+  void useCircle(String circleId) {}
+  @override
+  Future<List<CircleMember>> fetchCircleMembers() async => [];
+  @override
+  Future<void> setCircleBirthday(int? month, int? day) async {}
+  @override
+  Future<List<CircleAnswer>> fetchCircleAnswers() async => [];
+  @override
+  Future<void> uploadCircleAnswer({
+    required String week,
+    required String localPath,
+    required String authorName,
+  }) => throw UnsupportedError('no sync');
+  @override
+  Future<String> circleSignedUrl(String path) =>
+      throw UnsupportedError('no sync');
 }

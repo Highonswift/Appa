@@ -58,9 +58,15 @@ class _SetupScreenState extends State<SetupScreen> {
         icon: const Icon(Icons.family_restroom, size: 34),
         label: const Text('குடும்பத்தினர் போன்'),
       ),
+      const SizedBox(height: 16),
+      OutlinedButton.icon(
+        onPressed: () => setState(() => role = DeviceRole.friend),
+        icon: const Icon(Icons.handshake, size: 34),
+        label: const Text('நண்பர் / உதவி கேட்பவர்'),
+      ),
       const SizedBox(height: 8),
       Text(
-        'குடும்பத்தினர் போனில்: அப்பாவின் கதைகளைக் கேட்டு, குரல் பதில் அனுப்பலாம்.',
+        'குடும்பத்தினர் போனில்: அப்பாவின் கதைகளைக் கேட்டு, குரல் பதில் அனுப்பலாம். நண்பர் போனில்: அவரிடம் ஆலோசனை கேட்கலாம், டிப்போ நண்பர்கள் வட்டத்தில் சேரலாம்.',
         style: t.bodyMedium?.copyWith(color: AppColors.muted),
       ),
       const Spacer(),

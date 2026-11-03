@@ -11,6 +11,7 @@ import 'settings_screen.dart';
 import '../logic/daily_picker.dart';
 import '../models/models.dart';
 import '../widgets/health_chart.dart';
+import 'world_screens.dart';
 
 /// Family phone: hear Appa's stories and send a voice reply.
 
@@ -328,6 +329,24 @@ class _DayTabState extends State<_DayTab> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        Text('அருகில் நடக்கும் நிகழ்ச்சி சேர்க்க', style: t.titleLarge),
+        const SizedBox(height: 6),
+        Text(
+          'கோயில் விழா, ஓய்வுபெற்றோர் சங்கம், நடைக் குழு, நூலகம்: சில கி.மீ.க்குள். அவர் போனில் தெரியும்.',
+          style: t.bodyMedium?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(height: 10),
+        EventForm(
+          onSave: (title, place, at, note) async {
+            await s.addFamilyEvent(
+              title: title,
+              place: place,
+              startsAt: at,
+              note: note,
+            );
+          },
+        ),
+        const SizedBox(height: 28),
         Text('ஒரு வேலை கேளுங்கள் (நாளுக்கு ஒன்று)', style: t.titleLarge),
         const SizedBox(height: 6),
         Text(

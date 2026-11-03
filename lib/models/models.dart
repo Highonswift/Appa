@@ -363,7 +363,10 @@ class ReminderSettings {
 }
 
 /// Which side of the family this phone is.
-enum DeviceRole { appa, family }
+/// Which kind of phone this is. [friend]: someone outside the family — a
+/// helper who asks Appa questions, and/or a member of his retirees circle
+/// (Phase 4). A friend phone never sees his stories, health or plan.
+enum DeviceRole { appa, family, friend }
 
 // ============================================================== Phase 2
 
@@ -505,11 +508,19 @@ class FamilyQuestion {
     this.answerLocalPath,
     this.answerRemotePath,
     this.answeredAt,
+    this.outside = false,
+    this.topic,
   });
 
   final String id;
   final String authorName;
   final DateTime createdAt;
+
+  /// Phase 4 "Help others": asked by someone outside the immediate family.
+  final bool outside;
+
+  /// For outside questions: what it is about (see `helpTopics`).
+  final String? topic;
 
   /// Typed question (read aloud to him), or null if asked by voice.
   final String? text;
@@ -536,10 +547,14 @@ class FamilyQuestion {
     answerLocalPath: answerLocalPath ?? this.answerLocalPath,
     answerRemotePath: answerRemotePath ?? this.answerRemotePath,
     answeredAt: answeredAt ?? this.answeredAt,
+    outside: outside,
+    topic: topic,
   );
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    'outside': outside,
+    'topic': topic,
     'authorName': authorName,
     'createdAt': createdAt.toIso8601String(),
     'text': text,
@@ -562,6 +577,8 @@ class FamilyQuestion {
     answeredAt: j['answeredAt'] == null
         ? null
         : DateTime.parse(j['answeredAt'] as String),
+    outside: j['outside'] as bool? ?? false,
+    topic: j['topic'] as String?,
   );
 }
 
@@ -812,4 +829,167 @@ class AlertPermissions {
     },
     recipient: j['recipient'] as String? ?? 'ராகுல்',
   );
+}
+
+// ============================================================== Phase 4
+
+/// Something he fixed or looked after (roadmap: "the bike, the water pump,
+/// the fan, a neighbour's scooter. Photos, voice notes, dates").
+class RepairEntry {
+  RepairEntry({
+    required this.id,
+    required this.at,
+    required this.item,
+    this.note = '',
+    this.photoPath,
+    this.audioPath,
+    this.forWhom,
+  });
+
+  final String id;
+  final DateTime at;
+  final String item;
+  final String note;
+  final String? photoPath;
+  final String? audioPath;
+
+  /// Null when it was his own; otherwise who he fixed it for.
+  final String? forWhom;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'at': at.toIso8601String(),
+    'item': item,
+    'note': note,
+    'photoPath': photoPath,
+    'audioPath': audioPath,
+    'forWhom': forWhom,
+  };
+
+  factory RepairEntry.fromJson(Map<String, dynamic> j) => RepairEntry(
+    id: j['id'] as String,
+    at: DateTime.parse(j['at'] as String),
+    item: j['item'] as String? ?? '',
+    note: j['note'] as String? ?? '',
+    photoPath: j['photoPath'] as String?,
+    audioPath: j['audioPath'] as String?,
+    forWhom: j['forWhom'] as String?,
+  );
+}
+
+/// One line of the household ledger he keeps, if he wants to.
+class LedgerEntry {
+  LedgerEntry({
+    required this.id,
+    required this.at,
+    required this.item,
+    required this.amount,
+  });
+  final String id;
+  final DateTime at;
+  final String item;
+
+  /// Whole rupees.
+  final int amount;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'at': at.toIso8601String(),
+    'item': item,
+    'amount': amount,
+  };
+
+  factory LedgerEntry.fromJson(Map<String, dynamic> j) => LedgerEntry(
+    id: j['id'] as String,
+    at: DateTime.parse(j['at'] as String),
+    item: j['item'] as String? ?? '',
+    amount: j['amount'] as int? ?? 0,
+  );
+}
+
+/// A temple event, association meeting, walking group or reading group,
+/// curated by family (roadmap: "Curated by family at first, not scraped").
+class LocalEvent {
+  LocalEvent({
+    required this.id,
+    required this.title,
+    required this.place,
+    required this.startsAt,
+    this.note = '',
+    this.addedBy = '',
+    this.attended = false,
+  });
+
+  final String id;
+  final String title;
+  final String place;
+  final DateTime startsAt;
+  final String note;
+  final String addedBy;
+
+  /// He tapped "போனேன்" (I went) afterwards.
+  final bool attended;
+
+  LocalEvent copyWith({bool? attended}) => LocalEvent(
+    id: id,
+    title: title,
+    place: place,
+    startsAt: startsAt,
+    note: note,
+    addedBy: addedBy,
+    attended: attended ?? this.attended,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'place': place,
+    'startsAt': startsAt.toIso8601String(),
+    'note': note,
+    'addedBy': addedBy,
+    'attended': attended,
+  };
+
+  factory LocalEvent.fromJson(Map<String, dynamic> j) => LocalEvent(
+    id: j['id'] as String,
+    title: j['title'] as String? ?? '',
+    place: j['place'] as String? ?? '',
+    startsAt: DateTime.parse(j['startsAt'] as String),
+    note: j['note'] as String? ?? '',
+    addedBy: j['addedBy'] as String? ?? '',
+    attended: j['attended'] as bool? ?? false,
+  );
+}
+
+/// A member of the retirees circle, as other members see them.
+class CircleMember {
+  const CircleMember({
+    required this.name,
+    this.birthdayMonth,
+    this.birthdayDay,
+  });
+  final String name;
+  final int? birthdayMonth;
+  final int? birthdayDay;
+}
+
+/// One voice answer to a circle's weekly prompt.
+class CircleAnswer {
+  const CircleAnswer({
+    required this.id,
+    required this.week,
+    required this.authorName,
+    required this.audioPath,
+    required this.createdAt,
+    this.mine = false,
+  });
+
+  final String id;
+
+  /// ISO week key, e.g. "2026-W45".
+  final String week;
+  final String authorName;
+  final String audioPath;
+  final DateTime createdAt;
+  final bool mine;
 }

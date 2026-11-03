@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import 'routine_screen.dart';
 import 'sharing_screen.dart';
+import 'world_screens.dart';
 
 /// Settings for the family (Ragul sets these up beside Appa). Plain list,
 /// nothing hidden. Appa can open it too; nothing here happens behind his back.
@@ -95,6 +96,27 @@ class SettingsScreen extends StatelessWidget {
           ],
           _Section('குடும்பத்துடன் பகிர்தல் (விருப்பம்)'),
           _SyncSetup(appa: appa),
+          if (appa && s.sync.connected) ...[
+            _Section('உதவி கேட்பவர்கள் (வெளியாட்கள்)'),
+            Text(
+              'ராகுலின் குழுவினர், அக்கம்பக்கத்தினர், இளைய உறவினர்கள் இந்தக் குறியீட்டை வைத்து அவரிடம் கேள்வி மட்டும் கேட்கலாம். அவர்களுக்குக் கதைகள், உடல்நலம், திட்டம் எதுவும் தெரியாது.',
+              style: t.bodyMedium?.copyWith(color: AppColors.muted),
+            ),
+            const SizedBox(height: 8),
+            if (s.helpCode != null)
+              Text('குறியீடு: ${s.helpCode}', style: t.titleLarge),
+            OutlinedButton.icon(
+              onPressed: s.shareHelpCode,
+              icon: const Icon(Icons.share, size: 26),
+              label: Text(
+                s.helpCode == null
+                    ? 'குறியீடு உருவாக்கி அனுப்பு'
+                    : 'குறியீட்டை அனுப்பு',
+              ),
+            ),
+            _Section('டிப்போ நண்பர்கள் வட்டம்'),
+            const _CircleSetup(),
+          ],
           if (appa) ...[
             _Section('பேசும் வசதி (Gemini, இலவசம்)'),
             const _GeminiSetup(),
@@ -555,6 +577,66 @@ class _GeminiSetupState extends State<_GeminiSetup> {
             padding: const EdgeInsets.only(top: 6),
             child: Text(note!, style: t.bodyMedium),
           ),
+      ],
+    );
+  }
+}
+
+/// Appa's phone: start the retirees circle once, then share its code.
+class _CircleSetup extends StatefulWidget {
+  const _CircleSetup();
+  @override
+  State<_CircleSetup> createState() => _CircleSetupState();
+}
+
+class _CircleSetupState extends State<_CircleSetup> {
+  final name = TextEditingController(text: 'டிப்போ நண்பர்கள்');
+
+  @override
+  void dispose() {
+    name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final t = Theme.of(context).textTheme;
+    if (s.inCircle) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('குறியீடு: ${s.store.circleCode ?? ''}', style: t.titleLarge),
+          OutlinedButton.icon(
+            onPressed: s.shareCircleCode,
+            icon: const Icon(Icons.share, size: 26),
+            label: const Text('பழைய நண்பர்களுக்கு அனுப்பு'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const CircleScreen())),
+            child: const Text('வட்டத்தைத் திற'),
+          ),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'அவருடைய பழைய TNSTC நண்பர்களுக்கான தனி வட்டம். அவர்களுக்கு அவர் குடும்ப விவரம் எதுவும் தெரியாது.',
+          style: t.bodyMedium?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: name,
+          decoration: const InputDecoration(labelText: 'வட்டத்தின் பெயர்'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: () => s.createCircle(name.text),
+          child: const Text('வட்டம் தொடங்கு'),
+        ),
       ],
     );
   }

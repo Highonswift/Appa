@@ -50,7 +50,20 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
               icon: Icons.mark_chat_read,
               text: 'இப்போது புதிய கேள்வி இல்லை. குடும்பத்தினர் கேட்டதும் இங்கே வரும்.',
             ),
-          for (final q in waiting) ...[
+          if (waiting.any((q) => !q.outside)) ...[
+            Text('குடும்பம்', style: t.titleLarge),
+            const SizedBox(height: 8),
+          ],
+          for (final q in waiting.where((q) => !q.outside)) ...[
+            _QuestionTile(q: q),
+            const SizedBox(height: 12),
+          ],
+          if (waiting.any((q) => q.outside)) ...[
+            const SizedBox(height: 8),
+            Text('உங்கள் உதவி கேட்பவர்கள்', style: t.titleLarge),
+            const SizedBox(height: 8),
+          ],
+          for (final q in waiting.where((q) => q.outside)) ...[
             _QuestionTile(q: q),
             const SizedBox(height: 12),
           ],
@@ -108,7 +121,12 @@ class _QuestionTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${q.authorName} கேட்டது', style: t.titleMedium),
+                    Text(
+                      q.topic == null
+                          ? '${q.authorName} கேட்டது'
+                          : '${q.authorName} கேட்டது · ${q.topic}',
+                      style: t.titleMedium,
+                    ),
                     Text(
                       q.text ?? 'குரலில் கேட்டிருக்கிறார்கள்',
                       maxLines: 2,

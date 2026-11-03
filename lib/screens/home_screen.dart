@@ -7,6 +7,8 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import 'call_screen.dart';
 import 'companion_screen.dart';
+import 'diary_screens.dart';
+import 'world_screens.dart';
 import '../logic/phase3.dart';
 import 'plan_screen.dart';
 import 'questions_screen.dart';
@@ -114,7 +116,11 @@ class HomeScreen extends StatelessWidget {
               HomeTile(
                 icon: Icons.question_answer,
                 title: 'குடும்பத்தின் கேள்விகள்',
-                subtitle: q > 0 ? 'உங்கள் ஆலோசனை தேவை' : 'புதிய கேள்வி இல்லை',
+                subtitle: q == 0
+                    ? 'புதிய கேள்வி இல்லை'
+                    : s.unansweredOutside > 0
+                    ? 'உங்கள் ஆலோசனை தேவை (${s.unansweredOutside} வெளியிலிருந்து)'
+                    : 'உங்கள் ஆலோசனை தேவை',
                 badge: q > 0 ? '$q' : null,
                 color: AppColors.accent,
                 soft: AppColors.accentSoft,
@@ -176,7 +182,77 @@ class HomeScreen extends StatelessWidget {
                 soft: AppColors.accentSoft,
                 onTap: () => _open(context, const RoutineScreen()),
               ),
+              const SizedBox(height: 16),
+              HomeTile(
+                icon: Icons.build,
+                title: 'நான் சரிசெய்தவை',
+                subtitle: s.repairs.isEmpty
+                    ? 'இன்று எதையாவது சரிசெய்தீர்களா?'
+                    : '${s.repairs.length} வேலைகள்',
+                color: const Color(0xFF455A64),
+                soft: const Color(0xFFE6EBED),
+                onTap: () => _open(context, const RepairDiaryScreen()),
+              ),
+              if (s.upcoming.isNotEmpty || s.askAttended.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                HomeTile(
+                  icon: Icons.event,
+                  title: 'அருகில் நிகழ்ச்சிகள்',
+                  subtitle: s.upcoming.isEmpty
+                      ? 'போனீர்களா என்று சொல்லுங்கள்'
+                      : '${s.upcoming.first.title} · ${eventWhen(s.upcoming.first.startsAt)}',
+                  color: const Color(0xFF00695C),
+                  soft: const Color(0xFFDFF2EF),
+                  onTap: () => _open(context, const EventsScreen()),
+                ),
+              ],
+              if (s.inCircle) ...[
+                const SizedBox(height: 16),
+                HomeTile(
+                  icon: Icons.groups,
+                  title: 'டிப்போ நண்பர்கள் வட்டம்',
+                  subtitle: s.answeredCircleThisWeek
+                      ? 'இந்த வாரம் சொல்லிவிட்டீர்கள்'
+                      : 'இந்த வாரக் கேள்வி காத்திருக்கிறது',
+                  color: const Color(0xFF1565C0),
+                  soft: const Color(0xFFE3EEFB),
+                  onTap: () => _open(context, const CircleScreen()),
+                ),
+              ],
+              if (s.ledgerEnabled) ...[
+                const SizedBox(height: 16),
+                HomeTile(
+                  icon: Icons.account_balance_wallet,
+                  title: 'வீட்டுக் கணக்கு',
+                  subtitle:
+                      'இந்த மாதம் ₹ ${s.ledgerMonth(now.year, now.month).total}',
+                  color: const Color(0xFF6D4C41),
+                  soft: const Color(0xFFF1E9E6),
+                  onTap: () => _open(context, const LedgerScreen()),
+                ),
+              ],
               const SizedBox(height: 28),
+              if (!s.ledgerEnabled)
+                TextButton.icon(
+                  onPressed: () => _open(context, const LedgerScreen()),
+                  icon: const Icon(
+                    Icons.account_balance_wallet,
+                    size: 24,
+                    color: AppColors.muted,
+                  ),
+                  label: Text(
+                    'வீட்டுக் கணக்கு (விருப்பம்)',
+                    style: t.bodyMedium?.copyWith(color: AppColors.muted),
+                  ),
+                ),
+              TextButton.icon(
+                onPressed: () => _open(context, const EventsScreen()),
+                icon: const Icon(Icons.event, size: 24, color: AppColors.muted),
+                label: Text(
+                  'நிகழ்ச்சிகள்',
+                  style: t.bodyMedium?.copyWith(color: AppColors.muted),
+                ),
+              ),
               TextButton.icon(
                 onPressed: () => _open(context, const SharingScreen()),
                 icon: const Icon(
