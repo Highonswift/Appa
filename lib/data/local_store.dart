@@ -51,6 +51,9 @@ class LocalStore {
   static const _kHelpJoined = 'helpJoined';
   static const _kCircleId = 'circleId';
   static const _kCircleCode = 'circleCode';
+  static const _kNights = 'nights';
+  static const _kActivity = 'dayActivity';
+  static const _kBand = 'bandSettings';
 
   DeviceRole? get role {
     final r = _prefs.getString(_kRole);
@@ -295,4 +298,34 @@ class LocalStore {
     await _prefs.setString(_kCircleId, id);
     if (code != null) await _prefs.setString(_kCircleCode, code);
   }
+
+  // ------------------------------------------------------------ Phase 5
+
+  List<NightSleep> get nights => _list(_kNights, NightSleep.fromJson);
+  Future<void> saveNights(List<NightSleep> n) =>
+      _saveList(_kNights, n.map((e) => e.toJson()).toList());
+
+  List<DayActivity> get activity => _list(_kActivity, DayActivity.fromJson);
+  Future<void> saveActivity(List<DayActivity> a) =>
+      _saveList(_kActivity, a.map((e) => e.toJson()).toList());
+
+  /// Day he said "don't ask" about hours slept.
+  String? get hoursSkippedDay => _prefs.getString('hoursSkippedDay');
+  Future<void> saveHoursSkippedDay(String d) =>
+      _prefs.setString('hoursSkippedDay', d);
+
+  BandSettings get band {
+    final raw = _prefs.getString(_kBand);
+    if (raw == null) return const BandSettings();
+    try {
+      return BandSettings.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw) as Map),
+      );
+    } on FormatException {
+      return const BandSettings();
+    }
+  }
+
+  Future<void> saveBand(BandSettings b) =>
+      _prefs.setString(_kBand, jsonEncode(b.toJson()));
 }

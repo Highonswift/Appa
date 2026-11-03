@@ -5,6 +5,7 @@ import '../app_state.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../logic/phase3.dart';
+import '../logic/phase5.dart';
 import '../widgets/common.dart';
 
 /// Call someone today: one person a day, one tap to call, "not today"
@@ -115,6 +116,23 @@ class _CallScreenState extends State<CallScreen> {
             },
             child: const Text('இன்று வேண்டாம்'),
           ),
+          if (c.nearby && s.bandSettings.doctorCleared) ...[
+            const SizedBox(height: 16),
+            NoteBox(
+              icon: Icons.directions_walk,
+              color: AppColors.callGreen,
+              text: walkTogetherLine(c.name),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () async {
+                await s.planWalkWith(c);
+                await s.speaker.speak('நாளைய திட்டத்தில் சேர்த்தேன்.');
+              },
+              icon: const Icon(Icons.add, size: 26),
+              label: Text('நாளை காலை ${c.name}-உடன் நடை'),
+            ),
+          ],
         ],
       );
     }

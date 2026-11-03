@@ -53,6 +53,7 @@ dependencies:
   http: ^1.6.0
   archive: ^4.6.0
   image_picker: ^1.2.4
+  health: ^13.3.2
 
 dev_dependencies:
   flutter_test:

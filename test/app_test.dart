@@ -155,7 +155,11 @@ void main() {
       expect(find.text('நேற்று இரவு தூக்கம் எப்படி?'), findsOneWidget);
       await tapText(tester, 'நன்றாகத் தூங்கினேன்');
       expect(h.state.todaysSleep!.rating, SleepRating.good);
-      // Answered: the card leaves the home screen.
+      // Phase 5: two optional taps for bedtime and wake time, then it leaves.
+      expect(find.text('எப்போது தூங்கினீர்கள்?'), findsOneWidget);
+      await tapText(tester, 'இரவு 10');
+      await tapText(tester, 'காலை 6');
+      expect(h.state.lastNight!.minutes, 8 * 60);
       expect(find.text('நேற்று இரவு தூக்கம் எப்படி?'), findsNothing);
     });
 

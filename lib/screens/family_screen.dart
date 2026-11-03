@@ -12,6 +12,7 @@ import '../logic/daily_picker.dart';
 import '../models/models.dart';
 import '../widgets/health_chart.dart';
 import 'world_screens.dart';
+import '../logic/phase5.dart' show hoursLabel;
 
 /// Family phone: hear Appa's stories and send a voice reply.
 
@@ -402,6 +403,27 @@ class _DayTabState extends State<_DayTab> {
               subtitle: p.addedBy == null ? null : Text('${p.addedBy} கேட்டது'),
             ),
         const SizedBox(height: 24),
+        if (sh.walk || sh.sleepHours) ...[
+          Text('அவர் உடல் (அவர் பகிர்ந்தவை)', style: t.titleLarge),
+          const SizedBox(height: 8),
+          if (sh.walk)
+            Text(
+              'கடந்த 7 நாளில் நடந்த நாட்கள்: ${s.familyBody.where((b) => b.walked == true && DateTime.parse(b.day).isAfter(s.now.subtract(const Duration(days: 7)))).length}',
+              style: t.bodyLarge,
+            ),
+          if (sh.sleepHours)
+            for (final b
+                in s.familyBody
+                    .where((b) => b.sleepMinutes != null)
+                    .toList()
+                    .reversed
+                    .take(7))
+              Text(
+                '${b.day}: ${hoursLabel(b.sleepMinutes!)}',
+                style: t.bodyLarge,
+              ),
+          const SizedBox(height: 24),
+        ],
         Text('தூக்கம், கடந்த 7 நாள்', style: t.titleLarge),
         const SizedBox(height: 8),
         if (!sh.sleep)

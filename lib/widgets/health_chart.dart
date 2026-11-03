@@ -12,11 +12,15 @@ import '../theme.dart';
 class ChartSeries {
   const ChartSeries(this.label, this.points, this.color);
   final String label;
-  final List<(DateTime, int)> points;
+  final List<(DateTime, num)> points;
   final Color color;
 }
 
 const seriesBlue = Color(0xFF2A78D6);
+
+/// Whole numbers as they are; fractions (sleep hours) to one decimal.
+String chartValue(num v) =>
+    v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(1);
 const seriesOrange = Color(0xFFEB6834);
 
 class HealthChart extends StatefulWidget {
@@ -37,7 +41,7 @@ class HealthChart extends StatefulWidget {
 }
 
 class _HealthChartState extends State<HealthChart> {
-  (ChartSeries, (DateTime, int))? selected;
+  (ChartSeries, (DateTime, num))? selected;
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +133,7 @@ class _HealthChartState extends State<HealthChart> {
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                '${selected!.$1.label} · ${fmt(selected!.$2.$1)}: ${selected!.$2.$2} ${widget.unit}',
+                '${selected!.$1.label} · ${fmt(selected!.$2.$1)}: ${chartValue(selected!.$2.$2)} ${widget.unit}',
                 style: t.titleMedium,
               ),
             ),
@@ -152,7 +156,7 @@ class _ChartPainter extends CustomPainter {
   final List<ChartSeries> series;
   final DateTime from;
   final DateTime to;
-  final (ChartSeries, (DateTime, int))? selected;
+  final (ChartSeries, (DateTime, num))? selected;
   final TextStyle labelStyle;
   final TextStyle valueStyle;
 
@@ -165,13 +169,16 @@ class _ChartPainter extends CustomPainter {
     ];
     var lo = all.reduce(math.min).toDouble(),
         hi = all.reduce(math.max).toDouble();
-    final pad = math.max(5.0, (hi - lo) * 0.15);
-    lo = (((lo - pad) / 10).floor() * 10).toDouble();
-    hi = (((hi + pad) / 10).ceil() * 10).toDouble();
+    // Small values (sleep hours) round to 1; larger ones (BP, sugar) to 10.
+    final unit = hi < 30 ? 1.0 : 10.0;
+    final pad = math.max(unit / 2, (hi - lo) * 0.15);
+    lo = math.max(0, ((lo - pad) / unit).floor() * unit).toDouble();
+    hi = (((hi + pad) / unit).ceil() * unit).toDouble();
+    if (hi <= lo) hi = lo + unit;
     return (lo, hi);
   }
 
-  Offset _pos((DateTime, int) p, Size size, (double, double) yr) {
+  Offset _pos((DateTime, num) p, Size size, (double, double) yr) {
     final span = to.difference(from).inMinutes.clamp(1, 1 << 31);
     final x =
         _left +
@@ -183,9 +190,9 @@ class _ChartPainter extends CustomPainter {
     return Offset(x, y);
   }
 
-  (ChartSeries, (DateTime, int))? nearest(Offset tap, Size size) {
+  (ChartSeries, (DateTime, num))? nearest(Offset tap, Size size) {
     final yr = _yRange();
-    (ChartSeries, (DateTime, int))? best;
+    (ChartSeries, (DateTime, num))? best;
     var bestD = double.infinity;
     for (final s in series) {
       for (final p in s.points) {
@@ -261,7 +268,7 @@ class _ChartPainter extends CustomPainter {
       final last = _pos(s.points.last, size, yr);
       _text(
         canvas,
-        '${s.points.last.$2}',
+        chartValue(s.points.last.$2),
         Offset(last.dx + 8, last.dy),
         valueStyle,
       );

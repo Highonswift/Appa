@@ -9,6 +9,7 @@ import '../widgets/common.dart';
 import 'routine_screen.dart';
 import 'sharing_screen.dart';
 import 'world_screens.dart';
+import '../services/band.dart';
 
 /// Settings for the family (Ragul sets these up beside Appa). Plain list,
 /// nothing hidden. Appa can open it too; nothing here happens behind his back.
@@ -80,6 +81,8 @@ class SettingsScreen extends StatelessWidget {
             _ReminderEditor(settings: s.reminderSettings),
             _Section('தூக்கம் (கடந்த ஏழு நாள்)'),
             SleepWeek(ratings: s.lastWeekSleep, today: s.now),
+            _Section('கைப்பட்டை (fitness band) மற்றும் நடை'),
+            const _BandSetup(),
             _Section('தமிழ்க் குரல்'),
             Text(
               s.speaker.tamilAvailable
@@ -139,6 +142,7 @@ class SettingsScreen extends StatelessWidget {
     var group = existing?.group ?? ContactGroup.friend;
     int? bMonth = existing?.birthdayMonth;
     int? bDay = existing?.birthdayDay;
+    var nearby = existing?.nearby ?? false;
     const months = [
       'ஜன',
       'பிப்',
@@ -233,6 +237,12 @@ class SettingsScreen extends StatelessWidget {
                     ),
                   ],
                 ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: nearby,
+                  onChanged: (v) => setD(() => nearby = v ?? false),
+                  title: const Text('நடந்து போகும் தூரத்தில் இருக்கிறார்'),
+                ),
               ],
             ),
           ),
@@ -267,6 +277,7 @@ class SettingsScreen extends StatelessWidget {
                         group: group,
                         birthdayMonth: bMonth,
                         birthdayDay: bDay,
+                        nearby: nearby,
                         clearBirthday: bMonth == null || bDay == null,
                       ),
                 );
@@ -636,6 +647,105 @@ class _CircleSetupState extends State<_CircleSetup> {
         OutlinedButton(
           onPressed: () => s.createCircle(name.text),
           child: const Text('வட்டம் தொடங்கு'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Phase 5: connect the band through Health Connect, and record the
+/// doctor's go-ahead before any walking is suggested.
+class _BandSetup extends StatefulWidget {
+  const _BandSetup();
+  @override
+  State<_BandSetup> createState() => _BandSetupState();
+}
+
+class _BandSetupState extends State<_BandSetup> {
+  late final words = TextEditingController(
+    text: context.read<AppState>().bandSettings.doctorWords,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => context.read<AppState>().refreshBandStatus(),
+    );
+  }
+
+  @override
+  void dispose() {
+    words.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    final t = Theme.of(context).textTheme;
+    final b = s.bandSettings;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'கைப்பட்டையின் சொந்த ஆப் Health Connect-இல் எழுத வேண்டும். இந்த ஆப் அதிலிருந்து தூக்கம், அடிகள், ஓய்வு இதயத் துடிப்பு மட்டும் படிக்கும்; எதையும் எழுதாது.',
+          style: t.bodyMedium?.copyWith(color: AppColors.muted),
+        ),
+        const SizedBox(height: 8),
+        switch (s.bandStatus) {
+          BandStatus.connected => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'இணைக்கப்பட்டது.',
+                style: t.titleMedium?.copyWith(color: AppColors.callGreen),
+              ),
+              OutlinedButton.icon(
+                onPressed: s.bandSyncing ? null : s.syncBand,
+                icon: const Icon(Icons.sync, size: 26),
+                label: Text(s.bandSyncing ? 'படிக்கிறது…' : 'இப்போது படி'),
+              ),
+            ],
+          ),
+          BandStatus.notConnected => OutlinedButton.icon(
+            onPressed: s.connectBand,
+            icon: const Icon(Icons.watch, size: 26),
+            label: const Text('கைப்பட்டையை இணை'),
+          ),
+          BandStatus.needsHealthConnect => OutlinedButton.icon(
+            onPressed: s.band.installHealthConnect,
+            icon: const Icon(Icons.download, size: 26),
+            label: const Text('Health Connect நிறுவு'),
+          ),
+          null => const SizedBox(height: 8),
+        },
+        const SizedBox(height: 12),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: b.doctorCleared,
+          onChanged: (v) => s.updateBandSettings(b.copyWith(doctorCleared: v)),
+          title: const Text(
+            'மருத்துவர் நடக்கச் சரி என்றார்',
+            style: TextStyle(fontSize: 20),
+          ),
+          subtitle: const Text('இது இல்லாமல் ஆப் நடையைப் பரிந்துரைக்காது'),
+        ),
+        TextField(
+          controller: words,
+          decoration: const InputDecoration(
+            labelText: 'மருத்துவர் சொன்னது (உதா: தினமும் 15 நிமிடம் மெதுவாக)',
+          ),
+          onSubmitted: (v) =>
+              s.updateBandSettings(b.copyWith(doctorWords: v.trim())),
+          onTapOutside: (_) {
+            if (words.text.trim() != s.bandSettings.doctorWords) {
+              s.updateBandSettings(
+                s.bandSettings.copyWith(doctorWords: words.text.trim()),
+              );
+            }
+            FocusScope.of(context).unfocus();
+          },
         ),
       ],
     );
